@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION get_market_offers(
     in_offer_side SMALLINT,
     in_quantity TEXT,
     in_token_data JSONB DEFAULT '[]'::JSONB, -- Input parameter for array of token data (token_id, price, fdv, total_supply) 
-    incentive_ids TEXT[] DEFAULT NULL
+    in_incentive_ids TEXT[] DEFAULT NULL
 )
 RETURNS TABLE (
     id TEXT,
@@ -101,12 +101,12 @@ BEGIN
             AND ro.is_cancelled = false
             AND ((ro.expiry = 0) OR (ro.expiry > EXTRACT(EPOCH FROM NOW())))
 
-            -- If incentive_ids is not NULL, ensure all elements in ro.token_ids are present in incentive_ids
+            -- If in_incentive_ids is not NULL, ensure all elements in ro.token_ids are present in in_incentive_ids
             AND (
-                incentive_ids IS NULL OR 
+                in_incentive_ids IS NULL OR 
                 (SELECT COUNT(*) = array_length(ro.token_ids, 1)
                  FROM unnest(ro.token_ids) AS token_id
-                 WHERE token_id = ANY(incentive_ids))
+                 WHERE token_id = ANY(in_incentive_ids))
             )
         ),
         offers_with_change_percent AS (
