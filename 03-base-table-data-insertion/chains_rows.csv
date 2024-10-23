@@ -1,0 +1,9 @@
+id,name,chain_id,image,native_token_id,type,is_supported,symbol
+arbitrum-one,Arbitrum,42161,https://assets.coingecko.com/asset_platforms/images/33/standard/AO_logomark.png,ethereum,mainnet,true,ARB
+arbitrum-sepolia,Arbitrum Sepolia,421614,https://assets.coingecko.com/asset_platforms/images/33/standard/AO_logomark.png,ethereum,testnet,true,ARB
+base,Base,8453,https://assets.coingecko.com/asset_platforms/images/131/standard/base.jpeg,ethereum,mainnet,true,BASE
+base-sepolia,Base Sepolia,84532,https://assets.coingecko.com/asset_platforms/images/131/standard/base.jpeg,ethereum,testnet,true,BASE
+ethereum,Ethereum,1,https://assets.coingecko.com/asset_platforms/images/279/standard/ethereum.png,ethereum,mainnet,true,ETH
+ethereum-sepolia,Ethereum Sepolia,11155111,https://assets.coingecko.com/asset_platforms/images/279/standard/ethereum.png,ethereum,testnet,true,ETH
+optimistic-ethereum,Optimism,10,https://assets.coingecko.com/asset_platforms/images/41/standard/optimism.png,ethereum,mainnet,true,OP
+optimistic-ethereum-sepolia,Optimism Sepolia,11155420,https://assets.coingecko.com/asset_platforms/images/41/standard/optimism.png,ethereum,testnet,true,OP
