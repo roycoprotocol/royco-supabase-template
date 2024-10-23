@@ -8,7 +8,8 @@ CREATE OR REPLACE FUNCTION get_market_offers(
     in_market_id TEXT,
     in_offer_side SMALLINT,
     in_quantity TEXT,
-    in_token_data JSONB DEFAULT '[]'::JSONB -- Input parameter for array of token data (token_id, price, fdv, total_supply) 
+    in_token_data JSONB DEFAULT '[]'::JSONB, -- Input parameter for array of token data (token_id, price, fdv, total_supply) 
+    incentive_ids TEXT[] DEFAULT NULL
 )
 RETURNS TABLE (
     id TEXT,
@@ -99,6 +100,14 @@ BEGIN
             AND ro.offer_side = in_offer_side
             AND ro.is_cancelled = false
             AND ((ro.expiry = 0) OR (ro.expiry > EXTRACT(EPOCH FROM NOW())))
+
+            -- If incentive_ids is not NULL, ensure all elements in ro.token_ids are present in incentive_ids
+            AND (
+                incentive_ids IS NULL OR 
+                (SELECT COUNT(*) = array_length(ro.token_ids, 1)
+                 FROM unnest(ro.token_ids) AS token_id
+                 WHERE token_id = ANY(incentive_ids))
+            )
         ),
         offers_with_change_percent AS (
             SELECT
@@ -220,4 +229,6 @@ GRANT EXECUTE ON FUNCTION get_market_offers TO anon;
 
 -- Sample Query: Change parameters based on your table data
 -- SELECT * FROM get_market_offers(11155111::NUMERIC, 0, '0x655c42f78c176db052676ac728b585d1b9c2c50ec1ed5c93a33e359e43a7f857'::TEXT, 0::SMALLINT, '26000000000000000000');
--- SELECT * FROM get_market_offers(11155111::NUMERIC, 1, '0x5802fb13468d943be6e4dca369f651e6e6088e92'::TEXT, 0::SMALLINT, '123');
+
+
+
