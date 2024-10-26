@@ -76,14 +76,15 @@ BEGIN
       WHERE acd.token_id = ANY(token_ids)
         AND acd.token_id NOT IN (SELECT tql.token_id FROM token_quotes_latest tql)
   )
-  SELECT 
+  SELECT DISTINCT ON (at.token_id) -- Select only distinct variations
       at.token_id,
       COALESCE(tq.decimals, 0) AS decimals,
       COALESCE(tq.price, 0) AS price,
       COALESCE(tq.total_supply, 0) AS total_supply,
       COALESCE(tq.fdv, 0) AS fdv
   FROM unnest(token_ids) AS at(token_id)
-  LEFT JOIN token_quotes tq ON at.token_id = tq.token_id;
+  LEFT JOIN token_quotes tq ON at.token_id = tq.token_id
+  ORDER BY at.token_id;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -98,6 +99,6 @@ SELECT * FROM get_token_quotes(
       {"token_id": "tokenB", "price": "88", "total_supply": "90"},
             {"token_id": "1-0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098", "total_supply": "5"},
              {"token_id": "1-0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098", "total_supply": "890"},
-              {"token_id": "1-0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098", "total_supply": "69", "fdv": "0"},
+              {"token_id": "1-0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098", "total_supply": "69"},
       {"token_id": "tokenC", "fdv": "3000"}]'::JSONB
 );
