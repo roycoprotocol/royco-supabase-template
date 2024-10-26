@@ -25,21 +25,11 @@ Enable following extensions in your supabase project instance (Go to Database ->
 
 4. Function Setup
 
-- Execute the file [001_token_index.sql](./04-functions/001_token_index.sql) in your SQL editor. Don't forget to update the `<COINMARKETCAP_API_KEY>` in the script.
-- Execute the file [002_get_enriched_markets.sql](./04-functions/002_get_enriched_markets.sql) in your SQL editor.
-- Execute the file [003_get_enriched_offers.sql](./04-functions/003_get_enriched_offers.sql) in your SQL editor.
-- Execute the file [004_get_market_offers.sql](./04-functions/004_get_market_offers.sql) in your SQL editor.
-- Execute the file [005_search_contracts.sql](./04-functions/005_search_contracts.sql) in your SQL editor.
-- Execute the file [006_get_contracts.sql](./04-functions/006_get_contracts.sql) in your SQL editor.
-- Execute the file [007_get_contracts_permissions.sql](./04-functions/007_get_contracts_permissions.sql) in your SQL editor.
+- Execute all the sql files sequentially in the [04-functions](./04-functions/) folder in your SQL editor.
 
 5. Materialized Views
 
-- Execute the file [001_enriched_market_stats.sql](./05-materialized-views/001_enriched_market_stats.sql) in your SQL editor.
-- Execute the file [002_distinct_token_filters.sql](./05-materialized-views/002_distinct_token_filters.sql) in your SQL editor.
-- Execute the file [003_market_search_index.sql](./05-materialized-views/003_market_search_index.sql) in your SQL editor.
-- Execute the file [004_search_index_contracts.sql](./05-materialized-views/004_search_index_contracts.sql) in your SQL editor.
-- Execute the file [005_enriched_royco_stats.sql](./05-materialized-views/005_enriched_royco_stats.sql) in your SQL editor.
+- Execute all the sql files sequentially in the [05-materialized-views](./05-materialized-views/) folder in your SQL editor.
 
 6. Enable Row Level Security (RLS)
 
