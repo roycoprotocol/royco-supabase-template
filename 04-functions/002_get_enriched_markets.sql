@@ -261,17 +261,19 @@ BEGIN
           SELECT ARRAY_AGG(
             CASE 
               WHEN rm.market_type = 1 AND rm.quantity_ip_usd != 0 -- rm.lockup_time is always 0 in vault markets
-                THEN (COALESCE(unnest_incentive_rates_usd, 0) / COALESCE(rm.quantity_ip_usd, 1)) * (365 * 24 * 60 * 60) -- Annualize the rate
+                THEN (COALESCE(rate_usd, 0) / COALESCE(rm.quantity_ip_usd, 1)) * (365 * 24 * 60 * 60) -- Annualize the rate
               WHEN rm.lockup_time = 0 
                 OR rm.quantity_ip_usd = 0 
-                OR COALESCE(unnest_incentive_rates, 0) = 10 ^ 18 THEN 10 ^ 18 -- 10^18 refers N/D
+                OR COALESCE(rate, 0) = 10 ^ 18 THEN 10 ^ 18 -- 10^18 refers N/D
               ELSE
-                (COALESCE(unnest_incentive_rates_usd, 0) / COALESCE(rm.quantity_ip_usd, 1)) * (365 * 24 * 60 * 60) -- Annualize the rate
+                (COALESCE(rate_usd, 0) / COALESCE(rm.quantity_ip_usd, 1)) * (365 * 24 * 60 * 60) -- Annualize the rate
             END
           )
-          FROM UNNEST(rm.incentive_rates) AS unnest_incentive_rates,
-              UNNEST(rm.incentive_rates_usd) AS unnest_incentive_rates_usd
+          FROM UNNEST(rm.incentive_rates) WITH ORDINALITY AS unnest_incentive_rates(rate, ord1)
+          JOIN UNNEST(rm.incentive_rates_usd) WITH ORDINALITY AS unnest_incentive_rates_usd(rate_usd, ord2)
+          ON ord1 = ord2
         ), ARRAY[]::NUMERIC[]) AS annual_change_ratios -- Default to an empty NUMERIC array if result is NULL
+
 
       FROM 
         enriched_raw_markets rm
