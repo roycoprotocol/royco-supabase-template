@@ -78,11 +78,10 @@ CREATE TYPE enriched_markets_return_type AS (
 
 -- Create new function
 CREATE OR REPLACE FUNCTION get_enriched_markets(
-    in_chain_id NUMERIC DEFAULT NULL,
-    in_market_type INTEGER DEFAULT NULL,
-    in_market_id TEXT DEFAULT NULL,
+    chain_id NUMERIC DEFAULT NULL,
+    market_type INTEGER DEFAULT NULL,
+    market_id TEXT DEFAULT NULL,
     custom_token_data JSONB DEFAULT '[]'::JSONB, -- Input parameter for array of token data (token_id, decimals, price, fdv, total_supply) 
-    -- in_token_data JSONB DEFAULT '[]'::JSONB, -- Input parameter for array of token data (token_id, price, fdv, total_supply) 
     page_index INT DEFAULT 0,
     filters TEXT DEFAULT NULL,  -- New input parameter for additional filters
     sorting TEXT DEFAULT NULL,
@@ -381,7 +380,7 @@ BEGIN
   -- Step 3: Calculate total count after filters are applied
   EXECUTE base_query || ' ) SELECT COUNT(*) FROM enriched_data;'
   INTO total_count
-  USING custom_token_data, in_chain_id, in_market_type, in_market_id;
+  USING custom_token_data, chain_id, market_type, market_id;
 
   -- Step 4: Add sorting
   IF sorting IS NOT NULL AND sorting <> '' THEN
@@ -393,7 +392,7 @@ BEGIN
   -- Step 4: Execute the paginated query to fetch the result data
   EXECUTE base_query || ' OFFSET $5 LIMIT 20 ) SELECT ARRAY_AGG(result.*) FROM enriched_data AS result;'
   INTO result_data
-  USING custom_token_data, in_chain_id, in_market_type, in_market_id, page_index * 20;
+  USING custom_token_data, chain_id, market_type, market_id, page_index * 20;
 
   -- Step 5: Return both total count and data
   RETURN (total_count, result_data)::enriched_markets_return_type;
@@ -414,15 +413,15 @@ FROM unnest((
 -- SELECT *
 -- FROM unnest((
 --     get_enriched_markets(
---       -- 11155111, -- in_chain_id, defaulting to NULL
---       -- 1, -- in_market_type, defaulting to NULL
---       -- '0x5802fb13468d943be6e4dca369f651e6e6088e92' -- in_market_id, defaulting to NULL
+--       -- 11155111, -- chain_id, defaulting to NULL
+--       -- 1, -- market_type, defaulting to NULL
+--       -- '0x5802fb13468d943be6e4dca369f651e6e6088e92' -- market_id, defaulting to NULL
 --       -- '[{
 --       --       "token_id": "11155111-0x3c727dd5ea4c55b7b9a85ea2f287c641481400f7",
 --       --       "price": 0.0001,
 --       --       "fdv": 50000000,
 --       --       "total_supply": 1000000
---       --     }]'::JSONB, -- in_token_data
+--       --     }]'::JSONB, -- custom_token_data
 
 --       --   0,
 --       --   NULL,
