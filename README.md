@@ -25,11 +25,11 @@ Enable following extensions in your supabase project instance (Go to Database ->
 
 4. Materialized Views
 
-- Execute all the sql files sequentially in the [05-materialized-views](./05-materialized-views/) folder in your SQL editor.
+- Execute all the sql files sequentially in the [04-materialized-views](./04-materialized-views/) folder in your SQL editor.
 
 5. Function Setup
 
-- Execute all the sql files sequentially in the [04-functions](./04-functions/) folder in your SQL editor.
+- Execute all the sql files sequentially in the [05-functions](./05-functions/) folder in your SQL editor.
 
 6. Enable Row Level Security (RLS)
 
