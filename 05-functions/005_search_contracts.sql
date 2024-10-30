@@ -92,7 +92,7 @@ BEGIN
   base_query := base_query || ' OFFSET ' || (page_index * page_size) || ' LIMIT ' || page_size;
 
   -- Fetch the rows
-  EXECUTE 'SELECT json_agg( ) FROM (' || base_query || ') AS final_query' INTO rows;
+  EXECUTE 'SELECT json_agg(final_query) FROM (' || base_query || ') AS final_query' INTO rows;
 
   -- Return the result as a JSON object
   RETURN (rows, total_count)::search_contracts_return;
@@ -101,5 +101,3 @@ $$ LANGUAGE plpgsql;
 
 -- Grant permission 
 GRANT EXECUTE ON FUNCTION search_contracts TO anon;
-
-
