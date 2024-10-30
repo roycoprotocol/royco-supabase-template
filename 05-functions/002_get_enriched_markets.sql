@@ -1,3 +1,5 @@
+-- Note: This function depends on the materialized view of "enriched_markets_stats", please run that query first and then run this
+
 -- Drop all function variations
 DO $$
 DECLARE
@@ -25,6 +27,7 @@ CREATE TYPE enriched_markets_data_type AS (
   market_type INTEGER,
   market_id TEXT,
   creator TEXT,
+  owner TEXT,
   input_token_id TEXT,
   lockup_time TEXT,
   frontend_fee TEXT,
@@ -40,6 +43,7 @@ CREATE TYPE enriched_markets_data_type AS (
   base_incentive_amounts TEXT[],
   base_start_timestamps TEXT[],
   base_end_timestamps TEXT[],
+  base_incentive_rates TEXT[],
 
   name TEXT,
   description TEXT,
@@ -139,6 +143,7 @@ BEGIN
         rm.market_type,
         rm.market_id,
         rm.creator,
+        rm.owner,
         rm.input_token_id,
         rm.lockup_time,
         rm.frontend_fee,
@@ -155,6 +160,7 @@ BEGIN
         
         rm.start_timestamps,
         rm.end_timestamps,
+        rm.incentives_rates AS base_incentive_rates,
 
         COALESCE(mu.name, ''Unknown market'') AS name,
         COALESCE(mu.description, ''No description available'') AS description,
@@ -285,6 +291,7 @@ BEGIN
         rm.market_type,
         rm.market_id,
         rm.creator,
+        rm.owner,
         rm.input_token_id,
         to_char(rm.lockup_time, ''FM9999999999999999999999999999999999999999'') AS lockup_time,
         to_char(rm.frontend_fee, ''FM9999999999999999999999999999999999999999'') AS lockup_time,
@@ -306,6 +313,10 @@ BEGIN
             SELECT to_char(col_value, ''FM9999999999999999999999999999999999999999'')
             FROM unnest(rm.end_timestamps) AS col_value
         ) AS base_end_timestamps,  
+        array(
+            SELECT to_char(col_value, ''FM9999999999999999999999999999999999999999'')
+            FROM unnest(rm.base_incentive_rates) AS col_value
+        ) AS base_incentive_rates,  
         
         rm.name,
         rm.description,
@@ -402,6 +413,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Grant permission
+GRANT EXECUTE ON FUNCTION get_enriched_markets TO anon;
 
 -- Sample Query 1
 SELECT *

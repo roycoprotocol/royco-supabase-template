@@ -1,3 +1,22 @@
+-- @heads-up: This function will be updated in the future
+
+-- Drop all function variations
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN
+        SELECT oid::regprocedure AS func_signature
+        FROM pg_proc
+        WHERE proname = 'search_contracts'
+    LOOP
+        EXECUTE 'DROP FUNCTION ' || r.func_signature || ' CASCADE';
+    END LOOP;
+END $$;
+
+-- Drop exisiting type
+DROP TYPE IF EXISTS search_contracts_return;
+
 -- Create return type
 CREATE TYPE search_contracts_return AS (
   data JSONB,
@@ -58,7 +77,7 @@ BEGIN
     ELSE
       base_query := base_query || ' WHERE ';
     END IF;
-    base_query := base_query || 'id IN (SELECT id FROM search_index_contracts WHERE to_tsvector(search_id) @@ to_tsquery(''' || search_key || ':*''))';
+    base_query := base_query || 'id IN (SELECT id FROM contract_search_index WHERE to_tsvector(search_id) @@ to_tsquery(''' || search_key || ':*''))';
   END IF;
 
   -- Add sorting

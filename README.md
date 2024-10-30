@@ -23,13 +23,13 @@ Enable following extensions in your supabase project instance (Go to Database ->
 
 - Upload the csv files in the [03-base-table-data-insertion](./03-base-table-data-insertion/) folder to your created `chains` and `token_index` tables.
 
-4. Function Setup
-
-- Execute all the sql files sequentially in the [04-functions](./04-functions/) folder in your SQL editor.
-
-5. Materialized Views
+4. Materialized Views
 
 - Execute all the sql files sequentially in the [05-materialized-views](./05-materialized-views/) folder in your SQL editor.
+
+5. Function Setup
+
+- Execute all the sql files sequentially in the [04-functions](./04-functions/) folder in your SQL editor.
 
 6. Enable Row Level Security (RLS)
 

@@ -1,8 +1,8 @@
--- Drop existing view
-DROP MATERIALIZED VIEW IF EXISTS public.search_index_contracts;
+-- Drop View
+DROP MATERIALIZED VIEW IF EXISTS public.contract_search_index;
 
 -- Create Materialized View
-CREATE MATERIALIZED VIEW public.search_index_contracts AS 
+CREATE MATERIALIZED VIEW public.contract_search_index AS 
 SELECT 
   t.id,
   CONCAT(
@@ -10,7 +10,7 @@ SELECT
     LOWER(t.contract_name), ' ', 
     LOWER(t.label), ' ', 
     LOWER(t.type), ' ', 
-    LOWER(t.proxy_type),
+    LOWER(t.proxy_type), ' ',
     LOWER(t.implementation_id)
   ) AS search_id
 FROM 
@@ -18,7 +18,7 @@ FROM
 
 -- Refresh materialized view every minute
 SELECT cron.schedule(
-  'refresh_search_index_contracts',
+  'refresh_contract_search_index',
   '*/1 * * * *',  -- Every 1 minute
-  'REFRESH MATERIALIZED VIEW public.search_index_contracts'
+  'REFRESH MATERIALIZED VIEW public.contract_search_index'
 );

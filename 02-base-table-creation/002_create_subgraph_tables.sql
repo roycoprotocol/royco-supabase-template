@@ -8,6 +8,7 @@ create table
     market_type integer not null,
     market_id text not null,
     creator text not null,
+    owner text not null,
     input_token_id text not null,
     lockup_time numeric not null,
     frontend_fee numeric not null,
@@ -26,10 +27,10 @@ create table
     block_number numeric not null,
     block_timestamp numeric not null,
     log_index numeric not null,
-    underlying_vault_address text null,
-    incentives_rates numeric[] null,
-    start_timestamps numeric[] null,
-    end_timestamps numeric[] null,
+    underlying_vault_address text not null,
+    incentives_rates numeric[] not null,
+    start_timestamps numeric[] not null,
+    end_timestamps numeric[] not null,
     _gs_chain text not null,
     _gs_gid text not null,
     constraint raw_markets_pkey primary key (_gs_gid)
@@ -63,7 +64,7 @@ create table
     log_index numeric not null,
     _gs_chain text not null,
     _gs_gid text not null,
-    is_valid boolean not null default true,
+    is_valid boolean null default true,
     constraint raw_offers_pkey primary key (_gs_gid)
   ) tablespace pg_default;
 
@@ -113,6 +114,25 @@ create table
     _gs_chain text not null,
     _gs_gid text not null,
     constraint raw_account_balances_recipe_pkey primary key (_gs_gid)
+  ) tablespace pg_default;
+
+-- Create raw_account_balances_vault table
+create table
+  public.raw_account_balances_vault (
+    vid bigint not null,
+    block_range text not null,
+    id text not null,
+    chain_id numeric not null,
+    market_type integer not null,
+    market_id text not null,
+    account_address text not null,
+    input_token_id text not null,
+    quantity_received_amount numeric not null,
+    incentives_given_ids text[] not null,
+    incentives_given_amount numeric[] not null,
+    _gs_chain text not null,
+    _gs_gid text not null,
+    constraint raw_account_balances_vault_pkey primary key (_gs_gid)
   ) tablespace pg_default;
 
 -- Create raw_positions_recipe table

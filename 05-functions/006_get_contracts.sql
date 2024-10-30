@@ -1,4 +1,5 @@
 -- @note: Update the <BASE_FRONTEND_URL> with your own frontend URL before running this SQL script
+-- @heads-up: This function will be updated in the future
 
 -- Drop existing function
 DROP FUNCTION IF EXISTS get_contracts CASCADE;

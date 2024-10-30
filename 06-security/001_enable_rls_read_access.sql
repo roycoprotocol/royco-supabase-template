@@ -42,6 +42,7 @@ alter table "raw_markets" enable row level security;
 alter table "raw_offers" enable row level security;
 alter table "raw_activities" enable row level security;
 alter table "raw_account_balances_recipe" enable row level security;
+alter table "raw_account_balances_vault" enable row level security;
 alter table "raw_positions_recipe" enable row level security;
 
 -- Read access to subgraph tables
@@ -62,6 +63,11 @@ using ( true );
 
 create policy "Read access to raw_account_balances_recipe"
 on raw_account_balances_recipe for select
+to authenticated, anon
+using ( true );
+
+create policy "Read access to raw_account_balances_vault"
+on raw_account_balances_vault for select
 to authenticated, anon
 using ( true );
 

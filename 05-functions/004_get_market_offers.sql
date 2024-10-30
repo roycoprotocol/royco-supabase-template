@@ -1,5 +1,16 @@
--- Drop function
-DROP FUNCTION IF EXISTS get_market_offers CASCADE;
+-- Drop all function variations
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN
+        SELECT oid::regprocedure AS func_signature
+        FROM pg_proc
+        WHERE proname = 'get_market_offers'
+    LOOP
+        EXECUTE 'DROP FUNCTION ' || r.func_signature || ' CASCADE';
+    END LOOP;
+END $$;
 
 -- Create Function
 CREATE OR REPLACE FUNCTION get_market_offers(
@@ -8,8 +19,9 @@ CREATE OR REPLACE FUNCTION get_market_offers(
     in_market_id TEXT,
     in_offer_side SMALLINT,
     in_quantity TEXT,
-    in_token_data JSONB DEFAULT '[]'::JSONB, -- Input parameter for array of token data (token_id, price, fdv, total_supply) 
-    in_incentive_ids TEXT[] DEFAULT NULL
+    custom_token_data JSONB DEFAULT '[]'::JSONB, -- Input parameter for array of token data (token_id, price, fdv, total_supply) 
+    in_incentive_ids TEXT[] DEFAULT NULL,
+    in_incentive_amounts TEXT[] DEFAULT NULL
 )
 RETURNS TABLE (
     id TEXT,
@@ -19,17 +31,20 @@ RETURNS TABLE (
     expiry TEXT,
     funding_vault TEXT,
     creator TEXT,
-    token_amounts TEXT[],  -- Changed to TEXT[]
-    token_ids TEXT[],
+
+    input_token_id TEXT,
     quantity TEXT,
     quantity_remaining TEXT,
+    token_ids TEXT[],
+    token_amounts TEXT[],  -- Changed to TEXT[]
     protocol_fee_amounts TEXT[],
     frontend_fee_amounts TEXT[],
+
     is_valid BOOLEAN,
     block_timestamp BIGINT,
-    incentive_value_usd FLOAT,
-    quantity_value_usd FLOAT,
-    change_percent FLOAT,
+    incentive_value_usd NUMERIC,
+    quantity_value_usd NUMERIC,
+    change_percent NUMERIC,
     rank BIGINT,
     fill_quantity TEXT
 ) AS
@@ -42,20 +57,55 @@ BEGIN
     FOR r IN 
     (
         WITH 
-        token_prices AS (
-            -- Integrate the input token data and combine it with existing token prices
+        ranked_custom_data AS (
             SELECT 
-              COALESCE(input.token_id, tql.token_id) AS token_id,
-              COALESCE(input.price::NUMERIC, tql.price) AS price,
-              COALESCE(input.fdv::NUMERIC, tql.fdv) AS fdv,
-              COALESCE(input.total_supply::NUMERIC, tql.total_supply) AS total_supply,
-              COALESCE(tql.decimals, 18) AS decimals -- Default decimals if missing
+                input.token_id,
+                NULLIF(input.decimals, '')::NUMERIC AS decimals,
+                NULLIF(input.price, '')::NUMERIC AS price,
+                NULLIF(input.fdv, '')::NUMERIC AS fdv,
+                NULLIF(input.total_supply, '')::NUMERIC AS total_supply,
+                ROW_NUMBER() OVER (PARTITION BY input.token_id ORDER BY (SELECT NULL)) AS row_num
             FROM 
-              token_quotes_latest tql
-            LEFT JOIN 
-              jsonb_to_recordset(in_token_data) AS input(token_id TEXT, price NUMERIC, fdv NUMERIC, total_supply NUMERIC)
-              ON tql.token_id = input.token_id
+                jsonb_to_recordset(custom_token_data) AS input(token_id TEXT, decimals TEXT, price TEXT, fdv TEXT, total_supply TEXT)
         ),
+        aggregated_custom_data AS (
+            SELECT DISTINCT ON (token_id)
+                token_id,
+                COALESCE(
+                    decimals,
+                    FIRST_VALUE(decimals) OVER (PARTITION BY token_id ORDER BY row_num DESC)
+                ) AS decimals,
+                COALESCE(
+                    price,
+                    FIRST_VALUE(price) OVER (PARTITION BY token_id ORDER BY row_num DESC)
+                ) AS price,
+                COALESCE(
+                    fdv,
+                    FIRST_VALUE(fdv) OVER (PARTITION BY token_id ORDER BY row_num DESC)
+                ) AS fdv,
+                COALESCE(
+                    total_supply,
+                    FIRST_VALUE(total_supply) OVER (PARTITION BY token_id ORDER BY row_num DESC)
+                ) AS total_supply
+            FROM ranked_custom_data
+            ORDER BY token_id, row_num DESC
+        ),
+        token_quotes AS (
+            -- Combine token quotes from the latest data and aggregated input data
+            SELECT 
+                COALESCE(acd.token_id, tql.token_id) AS token_id,
+                COALESCE(acd.decimals, tql.decimals, 18) AS decimals,
+                COALESCE(acd.price, tql.price, 0) AS price,
+                COALESCE(acd.fdv, tql.fdv, 0) AS fdv,
+                COALESCE(acd.total_supply, tql.total_supply, 0) AS total_supply
+            FROM 
+                token_quotes_latest tql
+            FULL OUTER JOIN 
+                aggregated_custom_data acd
+                ON tql.token_id = acd.token_id
+        ),
+
+
         enriched_market_data AS (
           SELECT 
             em.input_token_id
@@ -74,7 +124,7 @@ BEGIN
                      FROM 
                         UNNEST(ro.token_ids, ro.token_amounts) WITH ORDINALITY AS token(token_id, amount, idx)
                      LEFT JOIN 
-                        token_prices tp ON token.token_id = tp.token_id
+                        token_quotes tp ON token.token_id = tp.token_id
                      WHERE tp.token_id IS NOT NULL
                     ), 
                     0
@@ -86,7 +136,7 @@ BEGIN
                      FROM 
                         enriched_market_data emd_input
                      LEFT JOIN 
-                        token_prices tp ON emd_input.input_token_id = tp.token_id
+                        token_quotes tp ON emd_input.input_token_id = tp.token_id
                      WHERE 
                         tp.token_id IS NOT NULL
                      LIMIT 1
@@ -103,10 +153,25 @@ BEGIN
 
             -- If in_incentive_ids is not NULL, ensure all elements in ro.token_ids are present in in_incentive_ids
             AND (
+                -- Check if all required token_ids are present
                 in_incentive_ids IS NULL OR 
                 (SELECT COUNT(*) = array_length(ro.token_ids, 1)
                  FROM unnest(ro.token_ids) AS token_id
                  WHERE token_id = ANY(in_incentive_ids))
+                AND
+
+                -- Check if token amounts meet minimum requirements
+                (SELECT BOOL_AND(
+                    CASE 
+                        WHEN idx IS NOT NULL THEN 
+                            ro.token_amounts[token_idx] >= in_incentive_amounts[idx]::NUMERIC
+                        ELSE TRUE
+                    END
+                )
+                FROM unnest(ro.token_ids) WITH ORDINALITY AS t(token_id, token_idx)
+                LEFT JOIN unnest(in_incentive_ids) WITH ORDINALITY AS i(incentive_id, idx) 
+                    ON t.token_id = i.incentive_id
+                )
             )
         ),
         offers_with_change_percent AS (
@@ -145,6 +210,7 @@ BEGIN
             o.expiry,
             o.funding_vault,
             o.creator,
+            o.input_token_id,
             -- Convert token_amounts from NUMERIC[] to TEXT[]
             array(
                 SELECT to_char(amount, 'FM9999999999999999999999999999999999999999')
@@ -176,7 +242,7 @@ BEGIN
         JOIN offers_with_change_percent o ON o.id = ro.id
         ORDER BY ro.rank
     ) 
-    LOOP
+    LOOP        
         -- Calculate the fill quantity
         IF r.quantity_remaining <= fill_quantity_remaining THEN
             -- fill_quantity := r.quantity_remaining;
@@ -194,29 +260,34 @@ BEGIN
             CONTINUE;
         END IF;
 
-        -- Assign the current row values to the OUT parameters
-        id := r.id;
-        market_id := r.market_id;
-        offer_id := r.offer_id;
-        offer_side := r.offer_side;
-        expiry := to_char(r.expiry, 'FM9999999999999999999999999999999999999999');
-        funding_vault := r.funding_vault;
-        creator := r.creator;
-        token_amounts := r.token_amounts;  -- No need to convert again here
-        protocol_fee_amounts := r.protocol_fee_amounts;
-        frontend_fee_amounts := r.frontend_fee_amounts;
-        token_ids := r.token_ids;
-        quantity := to_char(r.quantity, 'FM9999999999999999999999999999999999999999');
-        quantity_remaining := to_char(r.quantity_remaining, 'FM9999999999999999999999999999999999999999');
-        is_valid := r.is_valid;
-        block_timestamp := r.block_timestamp;
-        incentive_value_usd := r.incentive_value_usd;
-        quantity_value_usd := r.quantity_value_usd;
-        change_percent := r.change_percent;
-        rank := r.rank;
-        
-        -- Return the current row
-        RETURN NEXT;
+        -- Only proceed if we have a non-zero fill_quantity
+        IF fill_quantity::NUMERIC > 0 THEN
+            -- Assign the current row values to the OUT parameters
+            id := r.id;
+            market_id := r.market_id;
+            offer_id := r.offer_id;
+            offer_side := r.offer_side;
+            expiry := to_char(r.expiry, 'FM9999999999999999999999999999999999999999');
+            funding_vault := r.funding_vault;
+            creator := r.creator;
+            
+            input_token_id := r.input_token_id;
+            quantity := to_char(r.quantity, 'FM9999999999999999999999999999999999999999');
+            quantity_remaining := to_char(r.quantity_remaining, 'FM9999999999999999999999999999999999999999');
+            token_ids := r.token_ids;
+            token_amounts := r.token_amounts;  -- No need to convert again here
+            protocol_fee_amounts := r.protocol_fee_amounts;
+            frontend_fee_amounts := r.frontend_fee_amounts;
+            
+            is_valid := r.is_valid;
+            block_timestamp := r.block_timestamp;
+            incentive_value_usd := r.incentive_value_usd;
+            quantity_value_usd := r.quantity_value_usd;
+            change_percent := r.change_percent;
+            rank := r.rank;
+
+            RETURN NEXT;
+        END IF;
         
         -- Break the loop if fill_quantity_remaining has been exhausted
         EXIT WHEN fill_quantity_remaining <= 0;
@@ -228,7 +299,23 @@ $$ LANGUAGE plpgsql;
 GRANT EXECUTE ON FUNCTION get_market_offers TO anon;
 
 -- Sample Query: Change parameters based on your table data
--- SELECT * FROM get_market_offers(11155111::NUMERIC, 0, '0x655c42f78c176db052676ac728b585d1b9c2c50ec1ed5c93a33e359e43a7f857'::TEXT, 0::SMALLINT, '26000000000000000000');
+SELECT * FROM get_market_offers(
+    11155111::NUMERIC,                    -- in_chain_id
+    1,                                    -- in_market_type
+    '0x3ab5695b341fc27f80271b7425d33e658bed758cd8c3b919f0763bd23d33dfc7'::TEXT,  -- in_market_id
+    0::SMALLINT,                         -- in_offer_side
+    '1000',                             -- in_quantity
+    --  '[{"token_id": "tokenA", "price": "1.5", "fdv": "1500", "total_supply": "1000"}, 
+    --   {"token_id": "tokenB", "price": "2.5"},
+    --   {"token_id": "tokenB", "price": "88", "total_supply": "90"},
+    --         {"token_id": "1-0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098", "total_supply": "5"},
+    --          {"token_id": "1-0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098", "total_supply": "890"},
+    --           {"token_id": "11155111-0x8be045085ee165eee605f7e005dbf5c1a9409265", "price": "0"},
+    --   {"token_id": "tokenC", "fdv": "3000"}]'::JSONB
+    NULL,
+    ARRAY['11155111-0x8be045085ee165eee605f7e005dbf5c1a9409265'],  -- in_incentive_ids
+    ARRAY['100000000000000000000']       -- in_incentive_amounts
+);
 
 
 
