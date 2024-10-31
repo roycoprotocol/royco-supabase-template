@@ -1,16 +1,39 @@
 -- Drop materialized view if exists
-DROP MATERIALIZED VIEW IF EXISTS public.enriched_markets_stats;
+DROP MATERIALIZED VIEW IF EXISTS public.enriched_markets_stats CASCADE;
+
+DROP VIEW IF EXISTS public.base_actions;
 
 -- Create materialized view
 CREATE MATERIALIZED VIEW public.enriched_markets_stats AS
 WITH 
-base_raw_recipe_offers AS (
+-- Recipe: Get all AP offers which are not cancelled, not expired and are valid
+raw_offers_recipe_ap AS (
   SELECT 
-    ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT AS id,
+    ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT AS id, -- id for raw_markets
     ro.quantity,
     ro.token_ids,
     ro.token_amounts,
-    COALESCE(rm.lockup_time, 0) AS lockup_time
+    rm.lockup_time AS lockup_time
+  FROM 
+    raw_offers ro
+    LEFT JOIN
+    raw_markets rm
+    ON ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT = rm.id
+  WHERE
+    ro.market_type = 0 -- Only Recipe Markets
+    AND ro.offer_side = 0 -- AP Offer Side
+    AND ro.is_cancelled = FALSE -- Not Cancelled
+    AND (ro.expiry = 0 OR ro.expiry > EXTRACT(EPOCH FROM NOW())) -- Not Expired
+    AND ro.is_valid = TRUE
+),
+-- Recipe: Get all IP offers which are not cancelled and not expired (note: IP offers are always valid, so no need to check is_valid)
+raw_offers_recipe_ip AS (
+  SELECT 
+    ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT AS id, -- id for raw_markets
+    ro.quantity,
+    ro.token_ids,
+    ro.token_amounts,
+    rm.lockup_time AS lockup_time
   FROM 
     raw_offers ro
     LEFT JOIN
@@ -20,27 +43,43 @@ base_raw_recipe_offers AS (
     ro.market_type = 0 -- Only Recipe Markets
     AND ro.offer_side = 1 -- IP Offer Side
     AND ro.is_cancelled = FALSE -- Not Cancelled
-    AND ro.expiry < EXTRACT(EPOCH FROM NOW()) -- Not Expired
+    AND (ro.expiry = 0 OR ro.expiry > EXTRACT(EPOCH FROM NOW())) -- Not Expired
 ),
-summed_quantity AS (
+
+-- Recipe: Get total available quantity for ap
+recipe_market_quantity_ap AS (
   SELECT 
     ro.id,
     ro.lockup_time,
-    SUM(ro.quantity) AS quantity
+    SUM(ro.quantity) AS quantity_ap
   FROM 
-    base_raw_recipe_offers ro
+    raw_offers_recipe_ap ro
   GROUP BY
     ro.id,
     ro.lockup_time
 ),
-unnested_offers AS (
+-- Recipe: Get total available quantity for ip
+recipe_market_quantity_ip AS (
+  SELECT 
+    ro.id,
+    ro.lockup_time,
+    SUM(ro.quantity) AS quantity_ip
+  FROM 
+    raw_offers_recipe_ip ro
+  GROUP BY
+    ro.id,
+    ro.lockup_time
+),
+
+-- Recipe: Unnest all IP offers for incentive token and their amounts
+raw_offers_recipe_ip_unnested AS (
   SELECT
     ro.id,
     ro.lockup_time,
     token_id,
     token_amount
   FROM 
-    base_raw_recipe_offers ro
+    raw_offers_recipe_ip ro
      -- Unnest token_ids with ordinality
     CROSS JOIN LATERAL unnest(ro.token_ids) WITH ORDINALITY AS token_ids_with_ord(token_id, ordinality)
     -- Unnest token_amounts with ordinality
@@ -49,37 +88,41 @@ unnested_offers AS (
     WHERE 
       token_ids_with_ord.ordinality = token_amounts_with_ord.ordinality
 ),
-summed_offers AS (
+-- Recipe: Get incentive amounts for each incentive id
+raw_offers_recipe_ip_incentives AS (
   SELECT
     uo.id,
-    uo.token_id,
     uo.lockup_time,
+    uo.token_id,
     SUM(uo.token_amount) AS token_amount
   FROM 
-    unnested_offers uo
+    raw_offers_recipe_ip_unnested uo
   GROUP BY 
     uo.id, 
     uo.token_id,
     uo.lockup_time
 ),
-merged_offers AS (
+-- Recipe: Get total incentive amounts for each incentive id
+raw_offers_recipe_ip_incentives_total AS (
   SELECT
     so.id,
     array_agg(so.token_id ORDER BY so.token_id) AS token_ids, -- Aggregate token_ids into an array
     array_agg(so.token_amount ORDER BY so.token_id) AS token_amounts, -- Aggregate token_amounts into an array
     array_agg(
       CASE 
-        WHEN so.lockup_time = 0 THEN (10 ^ 18)
+        WHEN so.lockup_time = 0 THEN (10 ^ 18) -- 10^18 refers to N/D
         ELSE (so.token_amount / so.lockup_time) 
       END
       ORDER BY so.token_id
     ) AS token_rates -- Calculate token rates and apply ORDER BY outside CASE
   FROM 
-    summed_offers so
+    raw_offers_recipe_ip_incentives so
   GROUP BY 
     so.id
 ),
-base_raw_positions_recipe AS (
+
+-- Recipe: Get positions which are not withdrawn
+raw_positions_recipe AS (
   SELECT 
     rp.chain_id::TEXT || '_' || '0' || '_' || rp.market_id::TEXT AS id,
     quantity
@@ -89,32 +132,41 @@ base_raw_positions_recipe AS (
     rp.offer_side = 0 -- Only AP positions
     AND is_withdrawn = false -- Not withdrawn
 ),
-recipe_locked_quantity AS (
+-- Recipe: Get total quantity locked
+locked_quantity_recipe AS (
   SELECT 
     rp.id,
     SUM(rp.quantity) AS locked_quantity
   FROM 
-    base_raw_positions_recipe rp
+    raw_positions_recipe rp
   GROUP BY
     rp.id
 ),
+
+-- Recipe: Combine all data
 enriched_recipe_market_data AS (
   SELECT 
     mo.id,
-    sq.quantity,
+    COALESCE(mqap.quantity_ap, 0) AS quantity_ap,
+    COALESCE(mqip.quantity_ip, 0) AS quantity_ip,
     COALESCE(lq.locked_quantity, 0) AS locked_quantity,
     mo.token_ids AS incentive_ids,
     mo.token_amounts AS incentive_amounts,
     mo.token_rates AS incentive_rates
   FROM 
-    merged_offers mo
+    raw_offers_recipe_ip_incentives_total mo
   LEFT JOIN
-    summed_quantity sq
-  ON mo.id = sq.id
+    recipe_market_quantity_ip mqip
+  ON mo.id = mqip.id
   LEFT JOIN
-    recipe_locked_quantity lq
+    recipe_market_quantity_ap mqap
+  ON mo.id = mqap.id
+  LEFT JOIN
+    locked_quantity_recipe lq
   ON mo.id = lq.id
 ),
+
+-- Vault: Get base vault markets
 base_raw_vault_markets AS (
   SELECT 
     rm.id,
@@ -129,6 +181,8 @@ base_raw_vault_markets AS (
   WHERE
     rm.market_type = 1 -- Only Vault Markets
 ),
+
+-- Vault: Unnest markets for each incentive token
 unnested_markets AS (
   SELECT
     rm.id,
@@ -156,6 +210,8 @@ unnested_markets AS (
       AND token_ids_with_ord.ordinality = start_timestamps_with_ord.ordinality
       AND token_ids_with_ord.ordinality = end_timestamps_with_ord.ordinality
 ),
+
+-- Vault: Get only those incentives whose rewards haven't ended yet
 filtered_markets AS (
   SELECT 
     rm.*
@@ -164,6 +220,8 @@ filtered_markets AS (
   WHERE
     rm.end_timestamp >= EXTRACT(EPOCH FROM NOW()) -- Compare end_timestamp with current time in seconds
 ),
+
+-- Vault: Merge markets
 merged_markets AS (
   SELECT
     so.id,
@@ -175,19 +233,60 @@ merged_markets AS (
   GROUP BY 
     so.id
 ),
+
+-- Vault: Get all AP offers which are not cancelled, not expired and are valid
+raw_offers_vault_ap AS (
+  SELECT 
+    ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT AS id, -- id for raw_markets
+    ro.quantity,
+    ro.token_ids,
+    ro.token_amounts,
+    rm.lockup_time AS lockup_time
+  FROM 
+    raw_offers ro
+    LEFT JOIN
+    raw_markets rm
+    ON ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT = rm.id
+  WHERE
+    ro.market_type = 1 -- Only Vault Markets
+    AND ro.offer_side = 0 -- AP Offer Side
+    AND ro.is_cancelled = FALSE -- Not Cancelled
+    AND (ro.expiry = 0 OR ro.expiry > EXTRACT(EPOCH FROM NOW())) -- Not Expired
+    AND ro.is_valid = TRUE
+),
+
+-- Vault: Get total available quantity for ap
+vault_market_quantity_ap AS (
+  SELECT 
+    ro.id,
+    ro.lockup_time,
+    SUM(ro.quantity) AS quantity_ap
+  FROM 
+    raw_offers_vault_ap ro
+  GROUP BY
+    ro.id,
+    ro.lockup_time
+),
+
+-- Vault: Create enriched data for vaults
 enriched_vault_market_data AS (
   SELECT 
-    mm.id,
-    bm.quantity,
-    bm.quantity AS locked_quantity,
-    mm.token_ids AS incentive_ids,
-    mm.token_amounts AS incentive_amounts, -- for vault markets, this represents rate
-    mm.token_rates AS incentive_rates
+    rm.id,
+    COALESCE(mqap.quantity_ap, 0) AS quantity_ap,
+    0 AS quantity_ip,
+    -- COALESCE(rm.quantity, 0) AS quantity_ip,
+    COALESCE(rm.quantity, 0) AS locked_quantity,
+    COALESCE(mm.token_ids, ARRAY[]::TEXT[]) AS incentive_ids,
+    COALESCE(mm.token_amounts, ARRAY[]::NUMERIC[]) AS incentive_amounts, -- for vault markets, this represents rate
+    COALESCE(mm.token_rates, ARRAY[]::NUMERIC[]) AS incentive_rates
   FROM 
-    merged_markets mm
+    base_raw_vault_markets rm
   LEFT JOIN
-    base_raw_vault_markets bm
-  ON mm.id = bm.id
+    merged_markets mm
+  ON rm.id = mm.id
+  LEFT JOIN
+    vault_market_quantity_ap mqap
+  ON rm.id = mqap.id
 ),
 combined_markets_data AS (
   SELECT * FROM enriched_recipe_market_data
@@ -212,3 +311,5 @@ SELECT cron.schedule(
   '*/1 * * * *',  -- Every 1 minute
   'REFRESH MATERIALIZED VIEW public.enriched_markets_stats'
 );
+
+REFRESH MATERIALIZED VIEW public.enriched_markets_stats;
