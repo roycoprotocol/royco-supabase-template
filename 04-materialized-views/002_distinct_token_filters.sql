@@ -28,7 +28,6 @@ SELECT
 FROM
     assets;
 
-
 -- Drop existing view
 DROP MATERIALIZED VIEW IF EXISTS public.distinct_incentives;
 
