@@ -34,3 +34,13 @@ Enable following extensions in your supabase project instance (Go to Database ->
 6. Enable Row Level Security (RLS)
 
 - Execute the file [001_enable_rls_read_access.sql](./06-security/001_enable_rls_read_access.sql) in your SQL editor.
+
+## Supabase Configurations
+
+1. Go to Settings -> Database (Under Configuration) -> Coonefction pooling configuration -> Change Pool Size to "45" from "15" (default)
+
+![alt text](./images/pool-size.png)
+
+2. The secret key called "SUPABASE_ROYCO_FRONTEND" that you use in Goldksy, change it to of mode "Session" instead of "Transaction" (default) -- then, delete the exisiting pipeline from Goldsky dashboard and run "./deploy-new-pipelines.sh" to deploy the new pipelines so that the change is triggered.
+
+![alt text](./images/goldksy-secret.png)
