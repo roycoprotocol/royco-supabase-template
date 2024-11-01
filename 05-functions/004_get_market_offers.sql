@@ -298,13 +298,32 @@ $$ LANGUAGE plpgsql;
 -- Grant permission
 GRANT EXECUTE ON FUNCTION get_market_offers TO anon;
 
+-- -- Sample Query: Change parameters based on your table data
+-- SELECT * FROM get_market_offers(
+--     11155111::NUMERIC,                    -- in_chain_id
+--     1,                                    -- in_market_type
+--     '0x3ab5695b341fc27f80271b7425d33e658bed758cd8c3b919f0763bd23d33dfc7'::TEXT,  -- in_market_id
+--     0::SMALLINT,                         -- in_offer_side
+--     '1000',                             -- in_quantity
+--     --  '[{"token_id": "tokenA", "price": "1.5", "fdv": "1500", "total_supply": "1000"}, 
+--     --   {"token_id": "tokenB", "price": "2.5"},
+--     --   {"token_id": "tokenB", "price": "88", "total_supply": "90"},
+--     --         {"token_id": "1-0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098", "total_supply": "5"},
+--     --          {"token_id": "1-0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098", "total_supply": "890"},
+--     --           {"token_id": "11155111-0x8be045085ee165eee605f7e005dbf5c1a9409265", "price": "0"},
+--     --   {"token_id": "tokenC", "fdv": "3000"}]'::JSONB
+--     NULL,
+--     ARRAY['11155111-0x8be045085ee165eee605f7e005dbf5c1a9409265'],  -- in_incentive_ids
+--     ARRAY['100000000000000000000']       -- in_incentive_amounts
+-- );
+
 -- Sample Query: Change parameters based on your table data
 SELECT * FROM get_market_offers(
     11155111::NUMERIC,                    -- in_chain_id
     1,                                    -- in_market_type
-    '0x3ab5695b341fc27f80271b7425d33e658bed758cd8c3b919f0763bd23d33dfc7'::TEXT,  -- in_market_id
-    0::SMALLINT,                         -- in_offer_side
-    '1000',                             -- in_quantity
+    '0x459d7d368b5f3854d3819299153e4df2bbd9c8e89edf1afedcd6ed6185b1f985'::TEXT,  -- in_market_id
+    1::SMALLINT,                         -- in_offer_side
+    '1000'                             -- in_quantity
     --  '[{"token_id": "tokenA", "price": "1.5", "fdv": "1500", "total_supply": "1000"}, 
     --   {"token_id": "tokenB", "price": "2.5"},
     --   {"token_id": "tokenB", "price": "88", "total_supply": "90"},
@@ -312,9 +331,9 @@ SELECT * FROM get_market_offers(
     --          {"token_id": "1-0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098", "total_supply": "890"},
     --           {"token_id": "11155111-0x8be045085ee165eee605f7e005dbf5c1a9409265", "price": "0"},
     --   {"token_id": "tokenC", "fdv": "3000"}]'::JSONB
-    NULL,
-    ARRAY['11155111-0x8be045085ee165eee605f7e005dbf5c1a9409265'],  -- in_incentive_ids
-    ARRAY['100000000000000000000']       -- in_incentive_amounts
+    -- NULL,
+    -- ARRAY['11155111-0x8be045085ee165eee605f7e005dbf5c1a9409265'],  -- in_incentive_ids
+    -- ARRAY['100000000000000000000']       -- in_incentive_amounts
 );
 
 

@@ -146,24 +146,29 @@ locked_quantity_recipe AS (
 -- Recipe: Combine all data
 enriched_recipe_market_data AS (
   SELECT 
-    mo.id,
+    rm.id,
     COALESCE(mqap.quantity_ap, 0) AS quantity_ap,
     COALESCE(mqip.quantity_ip, 0) AS quantity_ip,
     COALESCE(lq.locked_quantity, 0) AS locked_quantity,
-    mo.token_ids AS incentive_ids,
-    mo.token_amounts AS incentive_amounts,
-    mo.token_rates AS incentive_rates
+    COALESCE(mo.token_ids, ARRAY[]::TEXT[]) AS incentive_ids,
+    COALESCE(mo.token_amounts, ARRAY[]::NUMERIC[]) AS incentive_amounts,
+    COALESCE(mo.token_rates, ARRAY[]::NUMERIC[]) AS incentive_rates
   FROM 
-    raw_offers_recipe_ip_incentives_total mo
+    raw_markets rm
   LEFT JOIN
-    recipe_market_quantity_ip mqip
-  ON mo.id = mqip.id
+    raw_offers_recipe_ip_incentives_total mo
+  ON rm.id = mo.id
   LEFT JOIN
     recipe_market_quantity_ap mqap
-  ON mo.id = mqap.id
+  ON rm.id = mqap.id
+  LEFT JOIN
+    recipe_market_quantity_ip mqip
+  ON rm.id = mqip.id
   LEFT JOIN
     locked_quantity_recipe lq
-  ON mo.id = lq.id
+  ON rm.id = lq.id
+  WHERE
+    rm.market_type = 0
 ),
 
 -- Vault: Get base vault markets
@@ -313,3 +318,39 @@ SELECT cron.schedule(
 );
 
 REFRESH MATERIALIZED VIEW public.enriched_markets_stats;
+
+
+WITH
+-- Recipe: Get all AP offers which are not cancelled, not expired and are valid
+raw_offers_recipe_ap AS (
+  SELECT 
+    ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT AS id, -- id for raw_markets
+    ro.quantity,
+    ro.token_ids,
+    ro.token_amounts,
+    rm.lockup_time AS lockup_time
+  FROM 
+    raw_offers ro
+    LEFT JOIN
+    raw_markets rm
+    ON ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT = rm.id
+  WHERE
+    ro.market_type = 0 -- Only Recipe Markets
+    AND ro.offer_side = 0 -- AP Offer Side
+    AND ro.is_cancelled = FALSE -- Not Cancelled
+    AND (ro.expiry = 0 OR ro.expiry > EXTRACT(EPOCH FROM NOW())) -- Not Expired
+    AND ro.is_valid = TRUE
+),
+-- Recipe: Get total available quantity for ap
+recipe_market_quantity_ap AS (
+  SELECT 
+    ro.id,
+    ro.lockup_time,
+    SUM(ro.quantity) AS quantity_ap
+  FROM 
+    raw_offers_recipe_ap ro
+  GROUP BY
+    ro.id,
+    ro.lockup_time
+)
+SELECT * FROM recipe_market_quantity_ap;

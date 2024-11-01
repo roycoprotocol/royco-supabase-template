@@ -13,10 +13,10 @@ BEGIN
 END $$;
 
 -- Drop return type
-DROP TYPE enriched_offers_return_type;
+DROP TYPE IF EXISTS enriched_offers_return_type;
 
 -- Drop data type
-DROP TYPE enriched_offer_data_type;
+DROP TYPE IF EXISTS enriched_offer_data_type;
 
 -- Create data type
 CREATE TYPE enriched_offer_data_type AS (

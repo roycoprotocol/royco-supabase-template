@@ -1,5 +1,4 @@
 -- @note: Update the <BASE_FRONTEND_URL> with your own frontend URL before running this SQL script
--- @heads-up: This function will be updated in the future
 
 -- Drop existing function
 DROP FUNCTION IF EXISTS get_contracts CASCADE;
@@ -168,3 +167,4 @@ GRANT EXECUTE ON FUNCTION get_contracts TO anon;
 -- Sample Query: Update parameters based on your table data
 --SELECT * FROM get_contracts('[{"chain_id": 1, "contract_address": "0xa9dd04720a5d62ed6c0dd7acd735773652c8baab"}]'::jsonb);
 
+-- SELECT * FROM get_contracts('[{"chain_id": 1, "contract_address": "0xa9dd04720a5d62ed6c0dd7acd735773652c8baab"}]'::jsonb);
