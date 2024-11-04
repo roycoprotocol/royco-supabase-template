@@ -266,8 +266,8 @@ BEGIN
         COALESCE((
           SELECT ARRAY_AGG(
             CASE 
-              WHEN rm.market_type = 1 AND rm.quantity_ip_usd != 0 -- rm.lockup_time is always 0 in vault markets
-                THEN (COALESCE(rate_usd, 0) / COALESCE(rm.quantity_ip_usd, 1)) * (365 * 24 * 60 * 60) -- Annualize the rate
+              WHEN rm.market_type = 1 AND rm.quantity_ap_usd != 0 -- rm.lockup_time is always 0 in vault markets
+                THEN (COALESCE(rate_usd, 0) / COALESCE(rm.quantity_ap_usd, 1)) * (365 * 24 * 60 * 60) -- Annualize the rate
               WHEN rm.lockup_time = 0 
                 OR rm.quantity_ip_usd = 0 
                 OR COALESCE(rate, 0) = 10 ^ 18 THEN 10 ^ 18 -- 10^18 refers N/D

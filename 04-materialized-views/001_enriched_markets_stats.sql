@@ -11,6 +11,7 @@ raw_offers_recipe_ap AS (
   SELECT 
     ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT AS id, -- id for raw_markets
     ro.quantity,
+    ro.quantity_remaining,
     ro.token_ids,
     ro.token_amounts,
     rm.lockup_time AS lockup_time
@@ -31,6 +32,7 @@ raw_offers_recipe_ip AS (
   SELECT 
     ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT AS id, -- id for raw_markets
     ro.quantity,
+    ro.quantity_remaining,
     ro.token_ids,
     ro.token_amounts,
     rm.lockup_time AS lockup_time
@@ -51,7 +53,7 @@ recipe_market_quantity_ap AS (
   SELECT 
     ro.id,
     ro.lockup_time,
-    SUM(ro.quantity) AS quantity_ap
+    SUM(ro.quantity_remaining) AS quantity_ap
   FROM 
     raw_offers_recipe_ap ro
   GROUP BY
@@ -63,7 +65,7 @@ recipe_market_quantity_ip AS (
   SELECT 
     ro.id,
     ro.lockup_time,
-    SUM(ro.quantity) AS quantity_ip
+    SUM(ro.quantity_remaining) AS quantity_ip
   FROM 
     raw_offers_recipe_ip ro
   GROUP BY
@@ -222,8 +224,8 @@ filtered_markets AS (
     rm.*
   FROM 
     unnested_markets rm
-  WHERE
-    rm.end_timestamp >= EXTRACT(EPOCH FROM NOW()) -- Compare end_timestamp with current time in seconds
+  -- WHERE
+  --   rm.end_timestamp >= EXTRACT(EPOCH FROM NOW()) -- Compare end_timestamp with current time in seconds
 ),
 
 -- Vault: Merge markets
@@ -231,8 +233,22 @@ merged_markets AS (
   SELECT
     so.id,
     array_agg(so.token_id ORDER BY so.token_id) AS token_ids, -- Aggregate token_ids into an array
-    array_agg(so.token_amount ORDER BY so.token_id) AS token_amounts, -- Aggregate token_amounts into an array
-    array_agg(so.token_rate ORDER BY so.token_id) AS token_rates -- Aggregate token_rates into an array
+    -- array_agg(so.token_amount ORDER BY so.token_id) AS token_amounts, -- Aggregate token_amounts into an array
+    -- array_agg(so.token_rate ORDER BY so.token_id) AS token_rates -- Aggregate token_rates into an array
+    array_agg(
+      CASE 
+        WHEN so.end_timestamp <= EXTRACT(EPOCH FROM NOW()) THEN 0
+        ELSE so.token_amount
+      END 
+      ORDER BY so.token_id
+    ) AS token_amounts, -- Aggregate token_amounts into an array with condition
+    array_agg(
+      CASE 
+        WHEN so.end_timestamp <= EXTRACT(EPOCH FROM NOW()) THEN 0
+        ELSE so.token_rate
+      END 
+      ORDER BY so.token_id
+    ) AS token_rates -- Aggregate token_rates into an array with condition
   FROM 
     filtered_markets so
   GROUP BY 
