@@ -58,7 +58,7 @@ CREATE TYPE enriched_offer_data_type AS (
   name TEXT,
   lockup_time TEXT,
   reward_style NUMERIC,
-  change_ratio NUMERIC,
+  annual_change_ratios NUMERIC[],
   annual_change_ratio NUMERIC
 );
 
@@ -233,7 +233,8 @@ BEGIN
                   ), 
                   0
               ) AS incentive_value_usd
-            
+
+                
             FROM 
               raw_base_offers rro
             LEFT JOIN 
@@ -296,7 +297,32 @@ BEGIN
 
                 mu.name,
                 to_char(rm.lockup_time, ''FM9999999999999999999999999999999999999999'') AS lockup_time,
-                rm.reward_style
+                rm.reward_style,
+
+                -- Modify the annual_change_ratios calculation in enriched_raw_data CTE
+                ARRAY(
+                    SELECT 
+                        CASE 
+                            WHEN ro.market_type = 1 AND ro.quantity_value_usd = 0 THEN 0
+                            WHEN ro.market_type = 1
+                                THEN (
+                                    (token_amount::NUMERIC / POWER(10, COALESCE(tp.decimals, 18))) * COALESCE(tp.price, 0) * (365 * 24 * 60 * 60)
+                                    / COALESCE(ro.quantity_value_usd, 1)
+                                )
+                            WHEN ro.quantity_value_usd = 0 OR rm.lockup_time = 0
+                                THEN 0
+                            ELSE
+                                (
+                                    (token_amount::NUMERIC / POWER(10, COALESCE(tp.decimals, 18))) * COALESCE(tp.price, 0) * (365 * 24 * 60 * 60)
+                                    / (COALESCE(ro.quantity_value_usd, 1) * rm.lockup_time::NUMERIC)
+                                )
+                        END
+                    FROM UNNEST(
+                        ro.token_ids,
+                        ro.token_amounts
+                    ) WITH ORDINALITY AS token(token_id, token_amount, idx)
+                    LEFT JOIN token_quotes tp ON token.token_id = tp.token_id
+                ) AS annual_change_ratios
             FROM 
               enriched_offers ro 
             LEFT JOIN 
@@ -312,28 +338,23 @@ BEGIN
               SELECT
                 enriched_raw_data.*,
 
-                -- Calculate change_ratio using the calculated `quantity_value_usd`
-                COALESCE(
-                    CASE 
-                        WHEN enriched_raw_data.quantity_value_usd <= 0
-                            THEN 0
-                        ELSE 
-                            enriched_raw_data.incentive_value_usd / enriched_raw_data.quantity_value_usd
-                    END, 0
-                ) AS change_ratio,
-
                 -- Calculate annual_change_ratio considering lockup_time and reward_style
+                -- COALESCE(
+                --     CASE 
+                --         WHEN enriched_raw_data.market_type = 1 AND enriched_raw_data.quantity_value_usd = 0 THEN 0
+                --         WHEN enriched_raw_data.market_type = 1
+                --             THEN (COALESCE(enriched_raw_data.incentive_value_usd, 0) / COALESCE(enriched_raw_data.quantity_value_usd, 1)) * (365 * 24 * 60 * 60) -- in vaults, enriched_raw_data.incentive_value_usd represents rate usd
+                --         WHEN enriched_raw_data.quantity_value_usd = 0 OR enriched_raw_data.lockup_time::NUMERIC = 0
+                --             THEN 0
+                --         ELSE
+                --             ((enriched_raw_data.incentive_value_usd / enriched_raw_data.quantity_value_usd ) * (365 * 24 * 60 * 60) ) / (enriched_raw_data.lockup_time::NUMERIC)
+                --     END, 0
+                -- ) AS annual_change_ratio
+
                 COALESCE(
-                    CASE 
-                        WHEN enriched_raw_data.quantity_value_usd <= 0
-                            THEN 0
-                        WHEN enriched_raw_data.market_type = 1 
-                            THEN ((enriched_raw_data.incentive_value_usd / enriched_raw_data.quantity_value_usd )) * (365 * 24 * 60 * 60) -- in vaults, incentive_value_usd represents incentive_rate_usd
-                        WHEN enriched_raw_data.market_type = 0 AND enriched_raw_data.lockup_time::NUMERIC = 0 
-                            THEN 10^18 -- 10^18 refers to N/D
-                        ELSE 
-                            ((enriched_raw_data.incentive_value_usd / enriched_raw_data.quantity_value_usd ) * (365 * 24 * 60 * 60) ) / (enriched_raw_data.lockup_time::NUMERIC)
-                    END, 0
+                    (SELECT SUM(ratio) 
+                    FROM UNNEST(enriched_raw_data.annual_change_ratios) AS ratio),
+                    0
                 ) AS annual_change_ratio
               FROM 
                 enriched_raw_data
@@ -374,29 +395,29 @@ $$ LANGUAGE plpgsql;
 -- Grant permission
 GRANT EXECUTE ON FUNCTION get_enriched_offers TO anon;
 
--- SELECT *
--- FROM unnest((
---     get_enriched_offers(
---         11155111::NUMERIC,            -- chain_id
---         0::INTEGER,                   -- market_type
---         '0'::TEXT,                         -- in_market_id (set as NULL or pass valid TEXT)
---         '0x77777cc68b333a2256b436d675e8d257699aa667'::TEXT, -- creator
---          NULL,
---         '[{
---             "token_id": "11155111-0x3c727dd5ea4c55b7b9a85ea2f287c641481400f7",
---             "price": 10,
---             "fdv": 50000000,
---             "total_supply": 1000000
---           }]'::JSONB,                 -- in_token_data (JSONB)
---         0::INTEGER                 -- page_index
---         -- 'offer_side = 1'::TEXT,        -- filters
---         -- 'reward_style DESC, change_ratio DESC'
---     )
--- ).data) AS enriched_offer;
-
-
 SELECT *
 FROM unnest((
     get_enriched_offers(
+        11155111::NUMERIC,            -- chain_id
+        0::INTEGER,                   -- market_type
+        '0x025192ad91a6edf49274b434123ac04d69d30f09b15f45bbd6776e85a2c64174'::TEXT,                         -- in_market_id (set as NULL or pass valid TEXT)
+        '0x77777cc68b333a2256b436d675e8d257699aa667'::TEXT, -- creator
+         NULL
+        -- '[{
+        --     "token_id": "11155111-0x3c727dd5ea4c55b7b9a85ea2f287c641481400f7",
+        --     "price": 10,
+        --     "fdv": 50000000,
+        --     "total_supply": 1000000
+        --   }]'::JSONB,                 -- in_token_data (JSONB)
+        -- 0::INTEGER                 -- page_index
+        -- 'offer_side = 1'::TEXT,        -- filters
+        -- 'reward_style DESC, change_ratio DESC'
     )
 ).data) AS enriched_offer;
+
+
+-- SELECT *
+-- FROM unnest((
+--     get_enriched_offers(
+--     )
+-- ).data) AS enriched_offer;

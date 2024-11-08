@@ -47,6 +47,7 @@ CREATE TYPE enriched_markets_data_type AS (
 
   name TEXT,
   description TEXT,
+  is_verified BOOLEAN,
 
   quantity_ap TEXT,
   quantity_ip TEXT,
@@ -89,7 +90,8 @@ CREATE OR REPLACE FUNCTION get_enriched_markets(
     page_index INT DEFAULT 0,
     filters TEXT DEFAULT NULL,  -- New input parameter for additional filters
     sorting TEXT DEFAULT NULL,
-    search_key TEXT DEFAULT NULL
+    search_key TEXT DEFAULT NULL,
+    is_verified BOOLEAN DEFAULT NULL
 )
 RETURNS enriched_markets_return_type AS 
 $$
@@ -164,11 +166,13 @@ BEGIN
 
         COALESCE(mu.name, ''Unknown market'') AS name,
         COALESCE(mu.description, ''No description available'') AS description,
+        COALESCE(mu.is_verified, FALSE) AS is_verified,
 
         COALESCE(ms.quantity_ap, 0) AS quantity_ap,
         COALESCE(ms.quantity_ip, 0) AS quantity_ip,
         COALESCE(ms.locked_quantity, 0) AS locked_quantity,
-        COALESCE(ms.incentive_ids, ARRAY[]::TEXT[]) AS incentive_ids, -- Default empty array of type TEXT[]
+
+        COALESCE(ms.incentive_ids, ARRAY[]::TEXT[]) AS incentive_ids, -- Default empty array of type TEXT[] 
         COALESCE(ms.incentive_amounts, ARRAY[]::NUMERIC[]) AS incentive_amounts, -- Default empty array of type NUMERIC[]
         COALESCE(ms.incentive_rates, ARRAY[]::NUMERIC[]) AS incentive_rates -- Default empty array of type NUMERIC[]
 
@@ -186,6 +190,7 @@ BEGIN
         AND ($2 IS NULL OR rm.chain_id = $2) -- Optional chain_id
         AND ($3 IS NULL OR rm.market_type = $3) -- Optional market_type
         AND ($4 IS NULL OR rm.market_id = $4) -- Optional market_id
+        AND ($5 IS NULL OR mu.is_verified = $5) -- Optional is_verified
     ),
     enriched_raw_markets AS (
       SELECT 
@@ -262,24 +267,44 @@ BEGIN
           FROM UNNEST(rm.incentive_amounts_usd) AS val
         ), 0) AS total_incentive_amounts_usd,  -- Default to 0 if array is empty or NULL
 
-        -- Calculate annual_change_ratio for each incentive, using COALESCE to handle NULL values and empty arrays
         COALESCE((
+          WITH first_offer AS (
+            -- Get the first offers data
+            SELECT (unnest).*, 
+                  (SELECT SUM(amount::numeric) FROM unnest(token_amounts) amount) as total_amount
+            FROM get_enriched_offers(
+              rm.chain_id, 
+              rm.market_type, 
+              rm.market_id, 
+              NULL,
+              true,
+              $1,
+              0,
+              ''offer_side = 1'',
+              ''annual_change_ratio desc''
+            ) o,
+            unnest(o.data) 
+            LIMIT 1
+          )
           SELECT ARRAY_AGG(
-            CASE 
-              WHEN rm.market_type = 1 AND rm.quantity_ap_usd != 0 -- rm.lockup_time is always 0 in vault markets
-                THEN (COALESCE(rate_usd, 0) / COALESCE(rm.quantity_ap_usd, 1)) * (365 * 24 * 60 * 60) -- Annualize the rate
-              WHEN rm.lockup_time = 0 
-                OR rm.quantity_ip_usd = 0 
-                OR COALESCE(rate, 0) = 10 ^ 18 THEN 10 ^ 18 -- 10^18 refers N/D
+            CASE
+              WHEN rm.market_type = 1 AND COALESCE(rm.locked_quantity_usd, 0) = 0 THEN 0
+              WHEN rm.market_type = 1
+                THEN (COALESCE(rate_usd, 0) / COALESCE(rm.locked_quantity_usd, 1)) * (365 * 24 * 60 * 60)
               ELSE
-                (COALESCE(rate_usd, 0) / COALESCE(rm.quantity_ip_usd, 1)) * (365 * 24 * 60 * 60) -- Annualize the rate
+                COALESCE(
+                  (SELECT (token_amounts[array_position(token_ids, unnest_incentive_ids.id)]::numeric / total_amount) * annual_change_ratio
+                  FROM first_offer
+                  WHERE unnest_incentive_ids.id = ANY(token_ids)),
+                  0  -- Return 0 if no matching token_id found
+                )
             END
           )
-          FROM UNNEST(rm.incentive_rates) WITH ORDINALITY AS unnest_incentive_rates(rate, ord1)
-          JOIN UNNEST(rm.incentive_rates_usd) WITH ORDINALITY AS unnest_incentive_rates_usd(rate_usd, ord2)
-          ON ord1 = ord2
-        ), ARRAY[]::NUMERIC[]) AS annual_change_ratios -- Default to an empty NUMERIC array if result is NULL
-
+          FROM UNNEST(rm.incentive_ids) WITH ORDINALITY AS unnest_incentive_ids(id, ord1)
+          JOIN UNNEST(rm.incentive_rates) WITH ORDINALITY AS unnest_incentive_rates(rate, ord2) ON ord1 = ord2
+          JOIN UNNEST(rm.incentive_rates_usd) WITH ORDINALITY AS unnest_incentive_rates_usd(rate_usd, ord3) ON ord1 = ord3
+          JOIN UNNEST(rm.incentive_token_price_values) WITH ORDINALITY AS unnest_price_values(price_value, ord4) ON ord1 = ord4
+        ), ARRAY[]::NUMERIC[]) AS annual_change_ratios
 
       FROM 
         enriched_raw_markets rm
@@ -320,6 +345,7 @@ BEGIN
         
         rm.name,
         rm.description,
+        rm.is_verified,
 
         to_char(rm.quantity_ap, ''FM9999999999999999999999999999999999999999'') AS quantity_ap,
         to_char(rm.quantity_ip, ''FM9999999999999999999999999999999999999999'') AS quantity_ip,
@@ -361,8 +387,8 @@ BEGIN
           WHEN EXISTS (
             SELECT 1 
             FROM UNNEST(rm.annual_change_ratios) AS val
-            WHERE val = 10 ^ 18
-          ) THEN 10 ^ 18
+            WHERE val >= 10 ^ 18
+          ) THEN 0
           ELSE COALESCE(
             (SELECT SUM(val) FROM UNNEST(rm.annual_change_ratios) AS val), 0
           )
@@ -374,7 +400,6 @@ BEGIN
       enriched_data AS (
         SELECT * FROM final_enriched_data 
         WHERE id IS NOT NULL
-      
   ';
 
   -- Step 2: Add dynamic filters if provided
@@ -393,7 +418,7 @@ BEGIN
   -- Step 3: Calculate total count after filters are applied
   EXECUTE base_query || ' ) SELECT COUNT(*) FROM enriched_data;'
   INTO total_count
-  USING custom_token_data, chain_id, market_type, market_id;
+  USING custom_token_data, chain_id, market_type, market_id, is_verified;
 
   -- Step 4: Add sorting
   IF sorting IS NOT NULL AND sorting <> '' THEN
@@ -403,9 +428,9 @@ BEGIN
   END IF;
 
   -- Step 4: Execute the paginated query to fetch the result data
-  EXECUTE base_query || ' OFFSET $5 LIMIT 20 ) SELECT ARRAY_AGG(result.*) FROM enriched_data AS result;'
+  EXECUTE base_query || ' OFFSET $6 LIMIT 20 ) SELECT ARRAY_AGG(result.*) FROM enriched_data AS result;'
   INTO result_data
-  USING custom_token_data, chain_id, market_type, market_id, page_index * 20;
+  USING custom_token_data, chain_id, market_type, market_id, is_verified, page_index * 20;
 
   -- Step 5: Return both total count and data
   RETURN (total_count, result_data)::enriched_markets_return_type;
@@ -420,27 +445,26 @@ GRANT EXECUTE ON FUNCTION get_enriched_markets TO anon;
 SELECT *
 FROM unnest((
     get_enriched_markets(
-
     )
 ).data) AS enriched_market;
 
 -- Sample Query 2
--- SELECT *
--- FROM unnest((
---     get_enriched_markets(
---       -- 11155111, -- chain_id, defaulting to NULL
---       -- 1, -- market_type, defaulting to NULL
---       -- '0x5802fb13468d943be6e4dca369f651e6e6088e92' -- market_id, defaulting to NULL
---       -- '[{
---       --       "token_id": "11155111-0x3c727dd5ea4c55b7b9a85ea2f287c641481400f7",
---       --       "price": 0.0001,
---       --       "fdv": 50000000,
---       --       "total_supply": 1000000
---       --     }]'::JSONB, -- custom_token_data
+SELECT *
+FROM unnest((
+    get_enriched_markets(
+      42161, -- chain_id, defaulting to NULL
+      1, -- market_type, defaulting to NULL
+      '0x8ca48c0eedd6903d31c2a69e779f3eef7b059da2' -- market_id, defaulting to NULL
+      -- '[{
+      --       "token_id": "11155111-0x3c727dd5ea4c55b7b9a85ea2f287c641481400f7",
+      --       "price": 0.0001,
+      --       "fdv": 50000000,
+      --       "total_supply": 1000000
+      --     }]'::JSONB, -- custom_token_data
 
---       --   0,
---       --   NULL,
---       --   'locked_quantity_usd DESC',
---       --   'dewscrptas'
---     )
--- ).data) AS enriched_market;
+      --   0,
+      --   NULL,
+      --   'locked_quantity_usd DESC',
+      --   'dewscrptas'
+    )
+).data) AS enriched_market;

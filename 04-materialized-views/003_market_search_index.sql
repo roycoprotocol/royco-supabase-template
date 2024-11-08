@@ -10,6 +10,7 @@ t1 AS (
     rm.chain_id,
     rm.market_id,
     rm.input_token_id,
+    rm.market_type,  -- Added market_type
     mu.name,
     mu.description,
     rm.incentives_offered_ids
@@ -25,7 +26,8 @@ t2 AS (
     CONCAT(
       LOWER(rm.market_id), ' ',
       LOWER(rm.name), ' ', 
-      LOWER(rm.description), ' ', 
+      LOWER(rm.description), ' ',
+      CASE WHEN rm.market_type = 0 THEN 'recipe ' ELSE 'vault ' END,  -- Added conditional text
       LOWER((SELECT STRING_AGG(t.name || ' ' || t.symbol || ' ' || t.contract_address, ' ') 
             FROM token_index t 
             WHERE t.token_id = ANY(rm.incentives_offered_ids))), ' ', 

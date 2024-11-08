@@ -37,9 +37,10 @@ create table
 create table
   public.market_userdata (
     id text not null,
-    name text not null,
-    description text not null,
+    name text null,
+    description text null,
     last_updated timestamp with time zone not null default (now() at time zone 'utc'::text),
+    is_verified boolean not null default false,
     constraint market_userdata_pkey primary key (id)
   ) tablespace pg_default;
 

@@ -23,7 +23,7 @@ CREATE TYPE enriched_positions_recipe_data_type AS (
   id TEXT,
   chain_id NUMERIC,
   weiroll_wallet TEXT,
-  offer_side TEXT,
+  offer_side INTEGER,
   market_id TEXT,
   reward_style INTEGER,
 

@@ -334,39 +334,3 @@ SELECT cron.schedule(
 );
 
 REFRESH MATERIALIZED VIEW public.enriched_markets_stats;
-
-
-WITH
--- Recipe: Get all AP offers which are not cancelled, not expired and are valid
-raw_offers_recipe_ap AS (
-  SELECT 
-    ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT AS id, -- id for raw_markets
-    ro.quantity,
-    ro.token_ids,
-    ro.token_amounts,
-    rm.lockup_time AS lockup_time
-  FROM 
-    raw_offers ro
-    LEFT JOIN
-    raw_markets rm
-    ON ro.chain_id::TEXT || '_' || ro.market_type::TEXT || '_' || ro.market_id::TEXT = rm.id
-  WHERE
-    ro.market_type = 0 -- Only Recipe Markets
-    AND ro.offer_side = 0 -- AP Offer Side
-    AND ro.is_cancelled = FALSE -- Not Cancelled
-    AND (ro.expiry = 0 OR ro.expiry > EXTRACT(EPOCH FROM NOW())) -- Not Expired
-    AND ro.is_valid = TRUE
-),
--- Recipe: Get total available quantity for ap
-recipe_market_quantity_ap AS (
-  SELECT 
-    ro.id,
-    ro.lockup_time,
-    SUM(ro.quantity) AS quantity_ap
-  FROM 
-    raw_offers_recipe_ap ro
-  GROUP BY
-    ro.id,
-    ro.lockup_time
-)
-SELECT * FROM recipe_market_quantity_ap;

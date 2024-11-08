@@ -105,7 +105,6 @@ BEGIN
                 ON tql.token_id = acd.token_id
         ),
 
-
         enriched_market_data AS (
           SELECT 
             em.input_token_id
