@@ -159,17 +159,33 @@ BEGIN
                  WHERE token_id = ANY(in_incentive_ids))
                 AND
 
-                -- Check if token amounts meet minimum requirements
-                (SELECT BOOL_AND(
-                    CASE 
-                        WHEN idx IS NOT NULL THEN 
-                            ro.token_amounts[token_idx] >= in_incentive_amounts[idx]::NUMERIC
-                        ELSE TRUE
-                    END
-                )
-                FROM unnest(ro.token_ids) WITH ORDINALITY AS t(token_id, token_idx)
-                LEFT JOIN unnest(in_incentive_ids) WITH ORDINALITY AS i(incentive_id, idx) 
-                    ON t.token_id = i.incentive_id
+                -- -- Check if token amounts meet minimum requirements
+                -- (SELECT BOOL_AND(
+                --     CASE 
+                --         WHEN idx IS NOT NULL THEN 
+                --             ro.token_amounts[token_idx] <= in_incentive_amounts[idx]::NUMERIC
+                --         ELSE TRUE
+                --     END
+                -- )
+                -- FROM unnest(ro.token_ids) WITH ORDINALITY AS t(token_id, token_idx)
+                -- LEFT JOIN unnest(in_incentive_ids) WITH ORDINALITY AS i(incentive_id, idx) 
+                --     ON t.token_id = i.incentive_id
+                -- )
+
+                -- Check if token amounts meet minimum requirements (only if in_incentive_amounts is not NULL)
+                (
+                    in_incentive_amounts IS NULL OR
+                    (SELECT BOOL_AND(
+                        CASE 
+                            WHEN idx IS NOT NULL THEN 
+                                ro.token_amounts[token_idx] <= in_incentive_amounts[idx]::NUMERIC
+                            ELSE TRUE
+                        END
+                    )
+                    FROM unnest(ro.token_ids) WITH ORDINALITY AS t(token_id, token_idx)
+                    LEFT JOIN unnest(in_incentive_ids) WITH ORDINALITY AS i(incentive_id, idx) 
+                        ON t.token_id = i.incentive_id
+                    )
                 )
             )
         ),
@@ -320,9 +336,9 @@ GRANT EXECUTE ON FUNCTION get_market_offers TO anon;
 SELECT * FROM get_market_offers(
     11155111::NUMERIC,                    -- in_chain_id
     1,                                    -- in_market_type
-    '0x459d7d368b5f3854d3819299153e4df2bbd9c8e89edf1afedcd6ed6185b1f985'::TEXT,  -- in_market_id
-    1::SMALLINT,                         -- in_offer_side
-    '1000'                             -- in_quantity
+    '0xb37a9c19624efe296f9716a6dd65b89318c8cedd'::TEXT,  -- in_market_id
+    0::SMALLINT,                         -- in_offer_side
+    '100000000'                             -- in_quantity
     --  '[{"token_id": "tokenA", "price": "1.5", "fdv": "1500", "total_supply": "1000"}, 
     --   {"token_id": "tokenB", "price": "2.5"},
     --   {"token_id": "tokenB", "price": "88", "total_supply": "90"},
