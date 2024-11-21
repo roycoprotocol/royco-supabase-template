@@ -3,7 +3,7 @@ DROP MATERIALIZED VIEW IF EXISTS public.distinct_assets;
 
 -- Create View
 CREATE MATERIALIZED VIEW public.distinct_assets AS
-WITH distinct_assets AS (
+WITH asset_list AS (
     SELECT DISTINCT
         input_token_id AS id
     FROM
@@ -14,10 +14,12 @@ assets AS (
         t.symbol,
         ARRAY_AGG(t.token_id) AS ids
     FROM
-        distinct_assets a
+        asset_list a
     LEFT JOIN 
         token_index t ON a.id = t.token_id
     WHERE
+        a.id IS NOT NULL AND
+        t.token_id IS NOT NULL AND
         t.symbol IS NOT NULL
     GROUP BY
         t.symbol
@@ -33,7 +35,7 @@ DROP MATERIALIZED VIEW IF EXISTS public.distinct_incentives;
 
 -- Create View
 CREATE MATERIALIZED VIEW public.distinct_incentives AS
-WITH distinct_incentives AS (
+WITH incentive_list AS (
     SELECT DISTINCT
         UNNEST(incentive_ids) AS id
     FROM
@@ -44,8 +46,9 @@ incentives AS (
         t.symbol,
         ARRAY_AGG(t.token_id) AS ids
     FROM
-        distinct_incentives a
+        incentive_list a
     LEFT JOIN 
+        a.id IS NOT NULL AND
         token_index t ON a.id = t.token_id
     GROUP BY
         t.symbol
@@ -59,7 +62,7 @@ FROM
 -- Refresh both materialized views in a single cron job
 SELECT cron.schedule(
   'refresh_distinct_token_filters',
-  '* * * * *',  -- Every 1 min 
+  '*/1 * * * *',  -- Every 1 minute
   $$BEGIN
       REFRESH MATERIALIZED VIEW public.distinct_assets;
       REFRESH MATERIALIZED VIEW public.distinct_incentives;
@@ -68,6 +71,7 @@ SELECT cron.schedule(
 
 -- REFRESH MATERIALIZED VIEW public.distinct_assets;
 -- REFRESH MATERIALIZED VIEW public.distinct_incentives;
+
 
 -- SELECT * FROM cron.job;
 
