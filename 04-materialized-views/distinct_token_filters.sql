@@ -59,12 +59,15 @@ FROM
 -- Refresh both materialized views in a single cron job
 SELECT cron.schedule(
   'refresh_distinct_token_filters',
-  '*/1 * * * *',  -- Every 1 minute
+  '* * * * *',  -- Every 1 min 
   $$BEGIN
       REFRESH MATERIALIZED VIEW public.distinct_assets;
       REFRESH MATERIALIZED VIEW public.distinct_incentives;
   END;$$
 );
+
+-- REFRESH MATERIALIZED VIEW public.distinct_assets;
+-- REFRESH MATERIALIZED VIEW public.distinct_incentives;
 
 -- SELECT * FROM cron.job;
 

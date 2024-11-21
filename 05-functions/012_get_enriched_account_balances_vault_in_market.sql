@@ -25,7 +25,15 @@ RETURNS TABLE (
     input_token_fdv NUMERIC,
     input_token_total_supply NUMERIC,
 
+    quantity_ap TEXT,
     quantity_ip TEXT,
+
+    incentives_ids_ap TEXT[],
+    incentives_price_values_ap NUMERIC[],
+    incentives_fdv_values_ap NUMERIC[],
+    incentives_total_supply_values_ap NUMERIC[],
+
+    incentives_amount_ap TEXT[],
 
     incentives_ids_ip TEXT[],
     incentives_price_values_ip NUMERIC[],
@@ -72,6 +80,20 @@ BEGIN
         FULL OUTER JOIN 
             aggregated_custom_data acd
             ON tql.token_id = acd.token_id
+    ),
+
+    refined_rab AS (
+        SELECT
+            rab.*,
+            rm.incentives_offered_ids::TEXT[] AS incentives_received_ids,
+            ARRAY(
+                SELECT '0'
+                FROM unnest(rm.incentives_offered_ids) 
+            )::NUMERIC[] AS incentives_received_amount
+        FROM 
+            public.raw_account_balances_vault rab
+            LEFT JOIN public.raw_markets rm
+            ON rab.chain_id::TEXT || '_' || rab.market_type || '_' || rab.market_id = rm.id
     )
 
     SELECT        
@@ -80,7 +102,30 @@ BEGIN
         COALESCE(tp.fdv, 0) as input_token_fdv,
         COALESCE(tp.total_supply, 0) as input_token_total_supply,
 
+        to_char(rab.quantity_given_amount, 'FM9999999999999999999999999999999999999999') AS quantity_ap,
         to_char(rab.quantity_received_amount, 'FM9999999999999999999999999999999999999999') AS quantity_ip,
+
+        rab.incentives_received_ids AS incentives_ids_ap,
+        ARRAY(
+            SELECT COALESCE(tq.price, 0)
+            FROM UNNEST(rab.incentives_received_ids) WITH ORDINALITY AS ids(token_id, i)
+            LEFT JOIN token_quotes tq ON ids.token_id = tq.token_id
+        ) as incentives_price_values_ap,
+        ARRAY(
+            SELECT COALESCE(tq.fdv, 0)
+            FROM UNNEST(rab.incentives_received_ids) WITH ORDINALITY AS ids(token_id, i)
+            LEFT JOIN token_quotes tq ON ids.token_id = tq.token_id
+        ) as incentives_fdv_values_ap,
+        ARRAY(
+            SELECT COALESCE(tq.total_supply, 0)
+            FROM UNNEST(rab.incentives_received_ids) WITH ORDINALITY AS ids(token_id, i)
+            LEFT JOIN token_quotes tq ON ids.token_id = tq.token_id
+        ) as incentives_total_supply_values_ap,
+
+        array(
+            SELECT to_char(col_value, 'FM9999999999999999999999999999999999999999')
+            FROM unnest(rab.incentives_received_amount) AS col_value
+        ) AS incentives_amount_ap,
 
         rab.incentives_given_ids AS incentives_ids_ip,
         ARRAY(
@@ -104,7 +149,7 @@ BEGIN
             FROM unnest(rab.incentives_given_amount) AS col_value
         ) AS incentives_amount_ip
     FROM 
-        public.raw_account_balances_vault rab
+        refined_rab rab
     LEFT JOIN 
         token_quotes tp ON rab.input_token_id = tp.token_id
     WHERE 
@@ -119,7 +164,7 @@ $$ LANGUAGE plpgsql;
 GRANT EXECUTE ON FUNCTION get_enriched_account_balances_vault_in_market TO anon;
 
 -- Test query
-SELECT * FROM get_enriched_account_balances_vault_in_market(11155111::NUMERIC, '0xb37a9c19624efe296f9716a6dd65b89318c8cedd'::TEXT, '0x77777cc68b333a2256b436d675e8d257699aa667'::TEXT);
+SELECT * FROM get_enriched_account_balances_vault_in_market(11155111::NUMERIC, '0x8e43c5ac586a463325d89246374154162a05e970'::TEXT, '0x77777cc68b333a2256b436d675e8d257699aa667'::TEXT);
 
 
 -- Backup for global summation

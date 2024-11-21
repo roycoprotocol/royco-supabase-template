@@ -16,8 +16,7 @@ Enable following extensions in your supabase project instance (Go to Database ->
 
 2. Create base tables
 
-- Execute the file [001_create_util_tables.sql](./02-base-table-creation/001_create_util_tables.sql) in your SQL editor.
-- Execute the file [002_create_subgraph_tables.sql](./02-base-table-creation/002_create_subgraph_tables.sql) in your SQL editor.
+- Execute all the queries sequentially in the [02-base-table-creation](./02-base-table-creation/) folder in your SQL editor.
 
 3. Insert data into base tables
 
@@ -30,10 +29,6 @@ Enable following extensions in your supabase project instance (Go to Database ->
 5. Function Setup
 
 - Execute all the sql files sequentially in the [05-functions](./05-functions/) folder in your SQL editor.
-
-6. Enable Row Level Security (RLS)
-
-- Execute the file [001_enable_rls_read_access.sql](./06-security/001_enable_rls_read_access.sql) in your SQL editor.
 
 ## Supabase Configurations
 

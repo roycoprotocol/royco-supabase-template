@@ -318,3 +318,23 @@ CREATE TRIGGER trigger_token_index_last_updated
 AFTER INSERT ON public.token_quotes_historical
 FOR EACH ROW
 EXECUTE FUNCTION update_token_index_last_updated();
+
+-- Enable row level security on token_quotes_archive table
+alter table "token_quotes_archive" enable row level security;
+
+-- Grant read access to all users
+drop policy if exists "Read access to token_quotes_archive" on token_quotes_archive;
+create policy "Read access to token_quotes_archive"
+on token_quotes_archive for select
+to authenticated, anon
+using ( true );
+
+-- Enable row level security on token_quotes_historical table
+alter table "token_quotes_historical" enable row level security;
+
+-- Grant read access to all users
+drop policy if exists "Read access to token_quotes_historical" on token_quotes_historical;
+create policy "Read access to token_quotes_historical"
+on token_quotes_historical for select
+to authenticated, anon
+using ( true );

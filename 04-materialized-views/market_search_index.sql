@@ -44,6 +44,6 @@ SELECT * FROM t2;
 -- Refresh materialized view every minute
 SELECT cron.schedule(
   'refresh_market_search_index',
-  '*/1 * * * *',  -- Every 1 minute
+  '* * * * *',  -- Every 1 min
   'REFRESH MATERIALIZED VIEW public.market_search_index'
 );

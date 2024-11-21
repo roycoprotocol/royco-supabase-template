@@ -72,6 +72,7 @@ CREATE TYPE enriched_markets_data_type AS (
   total_incentive_amounts_usd NUMERIC,
   
   annual_change_ratios NUMERIC[],
+  native_annual_change_ratio NUMERIC,
   annual_change_ratio NUMERIC
 );
 
@@ -304,10 +305,16 @@ BEGIN
           JOIN UNNEST(rm.incentive_rates) WITH ORDINALITY AS unnest_incentive_rates(rate, ord2) ON ord1 = ord2
           JOIN UNNEST(rm.incentive_rates_usd) WITH ORDINALITY AS unnest_incentive_rates_usd(rate_usd, ord3) ON ord1 = ord3
           JOIN UNNEST(rm.incentive_token_price_values) WITH ORDINALITY AS unnest_price_values(price_value, ord4) ON ord1 = ord4
-        ), ARRAY[]::NUMERIC[]) AS annual_change_ratios
+        ), ARRAY[]::NUMERIC[]) AS annual_change_ratios,
+
+        -- Simply fetch native_annual_change_ratio
+        ruv.native_annual_change_ratio
 
       FROM 
-        enriched_raw_markets rm
+      enriched_raw_markets rm
+      LEFT JOIN public.raw_underlying_vaults ruv 
+        ON rm.chain_id = ruv.chain_id::numeric 
+        AND rm.underlying_vault_address = ruv.underlying_vault_address
     ),
     final_enriched_data AS (
       SELECT
@@ -381,8 +388,9 @@ BEGIN
 
         rm.total_incentive_amounts_usd,
         rm.annual_change_ratios,
+        rm.native_annual_change_ratio,
 
-        -- Calculate total_annual_change_ratio: if any value is 10^18, return 10^18, else sum the values or return 0 for empty array
+        -- Modified annual_change_ratio calculation to include native_annual_change_ratio
         CASE 
           WHEN EXISTS (
             SELECT 1 
@@ -391,7 +399,7 @@ BEGIN
           ) THEN 0
           ELSE COALESCE(
             (SELECT SUM(val) FROM UNNEST(rm.annual_change_ratios) AS val), 0
-          )
+          ) + COALESCE(rm.native_annual_change_ratio, 0)
         END AS annual_change_ratio
 
       FROM 

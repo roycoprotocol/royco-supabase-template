@@ -1,8 +1,6 @@
 -- Drop materialized view if exists
 DROP MATERIALIZED VIEW IF EXISTS public.enriched_markets_stats CASCADE;
 
-DROP VIEW IF EXISTS public.base_actions;
-
 -- Create materialized view
 CREATE MATERIALIZED VIEW public.enriched_markets_stats AS
 WITH 
@@ -329,7 +327,7 @@ SELECT * FROM combined_markets_with_userdata;
 -- Refresh materialized view every minute
 SELECT cron.schedule(
   'refresh_enriched_markets_stats',
-  '*/1 * * * *',  -- Every 1 minute
+  '* * * * *',  -- Every 1 min
   'REFRESH MATERIALIZED VIEW public.enriched_markets_stats'
 );
 

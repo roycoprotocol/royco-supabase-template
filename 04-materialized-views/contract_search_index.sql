@@ -19,6 +19,6 @@ FROM
 -- Refresh materialized view every minute
 SELECT cron.schedule(
   'refresh_contract_search_index',
-  '*/1 * * * *',  -- Every 1 minute
+  '* * * * *',  -- Every 1 min
   'REFRESH MATERIALIZED VIEW public.contract_search_index'
 );

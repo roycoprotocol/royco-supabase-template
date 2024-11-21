@@ -1,4 +1,4 @@
--- @note: Update the <BASE_FRONTEND_URL> with your own frontend URL before running this SQL script
+-- @note: Update the <BASE_FRONTEND_URL> (Eg: https://royco-testnet.vercel.app) with your own frontend URL before running this SQL script
 
 -- Drop existing function
 DROP FUNCTION IF EXISTS get_contracts CASCADE;
