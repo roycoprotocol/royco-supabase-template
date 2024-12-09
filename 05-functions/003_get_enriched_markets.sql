@@ -1,5 +1,3 @@
--- Note: This function depends on the materialized view of "enriched_markets_stats", please run that query first and then run this
-
 -- Drop all function variations
 DO $$
 DECLARE
@@ -26,7 +24,6 @@ CREATE TYPE enriched_markets_data_type AS (
   chain_id NUMERIC,
   market_type INTEGER,
   market_id TEXT,
-  creator TEXT,
   owner TEXT,
   input_token_id TEXT,
   lockup_time TEXT,
@@ -145,7 +142,6 @@ BEGIN
         rm.chain_id,
         rm.market_type,
         rm.market_id,
-        rm.creator,
         rm.owner,
         rm.input_token_id,
         rm.lockup_time,
@@ -322,7 +318,6 @@ BEGIN
         rm.chain_id,
         rm.market_type,
         rm.market_id,
-        rm.creator,
         rm.owner,
         rm.input_token_id,
         to_char(rm.lockup_time, ''FM9999999999999999999999999999999999999999'') AS lockup_time,

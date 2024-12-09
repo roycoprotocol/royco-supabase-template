@@ -1,7 +1,7 @@
--- Drop View
+-- Drop Materialized View
 DROP MATERIALIZED VIEW IF EXISTS public.market_search_index;
 
--- Create View
+-- Create Materialized View
 CREATE MATERIALIZED VIEW public.market_search_index AS
 WITH 
 t1 AS (
@@ -10,7 +10,7 @@ t1 AS (
     rm.chain_id,
     rm.market_id,
     rm.input_token_id,
-    rm.market_type,  -- Added market_type
+    rm.market_type,  
     mu.name,
     mu.description,
     rm.incentives_offered_ids
@@ -41,9 +41,22 @@ t2 AS (
 )
 SELECT * FROM t2;
 
--- Refresh materialized view every minute
+-- Drop the existing scheduled job if it exists
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'market_search_index_job') THEN
+        PERFORM cron.unschedule('market_search_index_job');
+    END IF;
+END
+$$;
+
+-- Refresh Materialized View every minute
 SELECT cron.schedule(
-  'refresh_market_search_index',
+  'market_search_index_job',
   '* * * * *',  -- Every 1 min
   'REFRESH MATERIALIZED VIEW public.market_search_index'
 );
+
+-- Test manual call
+-- REFRESH MATERIALIZED VIEW public.market_search_index;
+

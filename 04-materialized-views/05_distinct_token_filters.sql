@@ -1,7 +1,7 @@
--- Drop existing view
+-- Drop Materialized View
 DROP MATERIALIZED VIEW IF EXISTS public.distinct_assets;
 
--- Create View
+-- Create Materialized View
 CREATE MATERIALIZED VIEW public.distinct_assets AS
 WITH asset_list AS (
     SELECT DISTINCT
@@ -30,10 +30,10 @@ SELECT
 FROM
     assets;
 
--- Drop existing view
+-- Drop Materialized View
 DROP MATERIALIZED VIEW IF EXISTS public.distinct_incentives;
 
--- Create View
+-- Create Materialized View
 CREATE MATERIALIZED VIEW public.distinct_incentives AS
 WITH incentive_list AS (
     SELECT DISTINCT
@@ -48,8 +48,11 @@ incentives AS (
     FROM
         incentive_list a
     LEFT JOIN 
-        a.id IS NOT NULL AND
         token_index t ON a.id = t.token_id
+    WHERE
+        a.id IS NOT NULL AND
+        t.token_id IS NOT NULL AND
+        t.symbol IS NOT NULL
     GROUP BY
         t.symbol
 )
@@ -59,21 +62,38 @@ SELECT
 FROM
     incentives;
 
--- Refresh both materialized views in a single cron job
+-- Drop the existing scheduled job if it exists
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'distinct_assets_job') THEN
+        PERFORM cron.unschedule('distinct_assets_job');
+    END IF;
+END
+$$;
+
+-- Refresh materialized view every minute at 30th second
 SELECT cron.schedule(
-  'refresh_distinct_token_filters',
-  '*/1 * * * *',  -- Every 1 minute
-  $$BEGIN
-      REFRESH MATERIALIZED VIEW public.distinct_assets;
-      REFRESH MATERIALIZED VIEW public.distinct_incentives;
-  END;$$
+  'distinct_assets_job',
+  '30 * * * * *',  -- At 30th second of every minute
+  'REFRESH MATERIALIZED VIEW public.distinct_assets;'
 );
 
+-- Drop the existing scheduled job if it exists
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'distinct_incentives_job') THEN
+        PERFORM cron.unschedule('distinct_incentives_job');
+    END IF;
+END
+$$;
+
+-- Refresh materialized view every minute at 30th second
+SELECT cron.schedule(
+  'distinct_incentives_job',
+  '30 * * * * *',  -- At 30th second of every minute
+  'REFRESH MATERIALIZED VIEW public.distinct_incentives;'
+);
+
+-- Test manual calls
 -- REFRESH MATERIALIZED VIEW public.distinct_assets;
 -- REFRESH MATERIALIZED VIEW public.distinct_incentives;
-
-
--- SELECT * FROM cron.job;
-
--- SELECT cron.unschedule(jobid) FROM cron.job WHERE command LIKE 'REFRESH MATERIALIZED VIEW public.distinct_assets%';
--- SELECT cron.unschedule(jobid) FROM cron.job WHERE command LIKE 'REFRESH MATERIALIZED VIEW public.distinct_incentives%';

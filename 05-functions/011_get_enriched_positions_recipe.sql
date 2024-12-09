@@ -202,6 +202,7 @@ BEGIN
               -- Can Withdraw Column
               CASE 
                   WHEN rro.is_withdrawn = true THEN false
+                  WHEN rro.is_forfeited = true THEN true
                   WHEN rro.unlock_timestamp < EXTRACT(EPOCH FROM NOW()) AND rro.offer_side = 0 THEN true
                   ELSE false
               END AS can_withdraw,

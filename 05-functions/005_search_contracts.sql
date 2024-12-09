@@ -1,5 +1,3 @@
--- @heads-up: This function will be updated in the future
-
 -- Drop all function variations
 DO $$
 DECLARE

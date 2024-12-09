@@ -324,11 +324,21 @@ combined_markets_with_userdata AS (
 )
 SELECT * FROM combined_markets_with_userdata;
 
+-- Drop the existing scheduled job if it exists
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'enriched_markets_stats_job') THEN
+        PERFORM cron.unschedule('enriched_markets_stats_job');
+    END IF;
+END
+$$;
+
 -- Refresh materialized view every minute
 SELECT cron.schedule(
-  'refresh_enriched_markets_stats',
+  'enriched_markets_stats_job',
   '* * * * *',  -- Every 1 min
   'REFRESH MATERIALIZED VIEW public.enriched_markets_stats'
 );
 
-REFRESH MATERIALIZED VIEW public.enriched_markets_stats;
+-- Test manual call
+-- REFRESH MATERIALIZED VIEW public.enriched_markets_stats;

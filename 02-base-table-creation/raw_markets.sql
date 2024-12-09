@@ -10,7 +10,6 @@ create table
     chain_id numeric not null,
     market_type integer not null,
     market_id text not null,
-    creator text not null,
     owner text not null,
     input_token_id text not null,
     lockup_time numeric not null,

@@ -1,7 +1,18 @@
--- @note: Update the <BASE_FRONTEND_URL> (Eg: https://royco-testnet.vercel.app) with your own frontend URL before running this SQL script
+-- @note: Update the <BASE_FRONTEND_URL> with your own frontend URL before running this SQL script
 
--- Drop existing function
-DROP FUNCTION IF EXISTS get_contracts CASCADE;
+-- Drop all function variations
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN
+        SELECT oid::regprocedure AS func_signature
+        FROM pg_proc
+        WHERE proname = 'get_contracts'
+    LOOP
+        EXECUTE 'DROP FUNCTION ' || r.func_signature || ' CASCADE';
+    END LOOP;
+END $$;
 
 -- Create new function
 CREATE OR REPLACE FUNCTION get_contracts(_contracts jsonb) 
@@ -165,6 +176,4 @@ $$;
 GRANT EXECUTE ON FUNCTION get_contracts TO anon;
 
 -- Sample Query: Update parameters based on your table data
---SELECT * FROM get_contracts('[{"chain_id": 1, "contract_address": "0xa9dd04720a5d62ed6c0dd7acd735773652c8baab"}]'::jsonb);
-
 -- SELECT * FROM get_contracts('[{"chain_id": 1, "contract_address": "0xa9dd04720a5d62ed6c0dd7acd735773652c8baab"}]'::jsonb);

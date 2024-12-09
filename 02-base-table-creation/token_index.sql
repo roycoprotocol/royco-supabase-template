@@ -11,7 +11,7 @@ create table
     name text not null,
     symbol text not null,
     is_active boolean not null default false,
-    last_updated timestamp with time zone not null,
+    last_updated timestamp with time zone not null default (now() at time zone 'utc'::text),
     search_id text not null,
     decimals smallint not null default '0'::smallint,
     constraint token_index_pkey primary key (token_id),
