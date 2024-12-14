@@ -1,5 +1,5 @@
 -- Drop materialized view if exists
-DROP MATERIALIZED VIEW IF EXISTS public.enriched_markets_stats CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS public.enriched_markets_stats;
 
 -- Create materialized view
 CREATE MATERIALIZED VIEW public.enriched_markets_stats AS
