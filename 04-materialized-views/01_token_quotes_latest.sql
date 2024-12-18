@@ -48,10 +48,15 @@ base_points AS (
 ),
 unnested_points AS (
   -- Unnest the parallel arrays of token_ids and token_amounts
+  -- Only consider valid, active IP offers
   SELECT 
     unnest(token_ids) as token_id,
     unnest(token_amounts) as token_amount
   FROM raw_offers
+  WHERE 
+    offer_side = 1
+    AND (expiry = 0 OR expiry > EXTRACT(EPOCH FROM NOW())::numeric)
+    AND is_cancelled = false
 ),
 points_offer_supply AS (
   -- Sum up the token_amounts for each token_id
@@ -66,7 +71,7 @@ enriched_points AS (
     bp.token_id,
     bp.decimals,
     0::NUMERIC AS price,
-    COALESCE(bp.total_supply, 0) + COALESCE(pos.total_supply, 0)::NUMERIC AS total_supply,
+    (COALESCE(bp.total_supply, 0) + COALESCE(pos.total_supply, 0)::NUMERIC) / POWER(10, bp.decimals) AS total_supply,
     0::NUMERIC AS fdv
   FROM
     base_points bp
@@ -104,7 +109,7 @@ SELECT
   fdv
 FROM
   enriched_points;
-
+  
 -- Drop the existing scheduled job if it exists
 DO $$
 BEGIN
