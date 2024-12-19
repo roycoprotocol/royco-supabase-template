@@ -19,8 +19,6 @@ t2 AS (
     subquery.match_key,
     subquery.price,
     subquery.total_supply,
-    subquery.volume_24h,
-    subquery.market_cap,
     subquery.fully_diluted_market_cap,
     subquery.last_updated
   FROM (
@@ -28,8 +26,6 @@ t2 AS (
       source || '-' || search_id AS match_key,
       price,
       total_supply,
-      volume_24h,
-      market_cap,
       fully_diluted_market_cap,
       last_updated,
       ROW_NUMBER() OVER (PARTITION BY source || '-' || search_id ORDER BY last_updated DESC) as rn
@@ -78,37 +74,58 @@ enriched_points AS (
     LEFT JOIN
     points_offer_supply pos
     ON bp.token_id = pos.token_id
+),
+combined_results AS (
+    SELECT  
+        t1.token_id,
+        t1.decimals,
+        t2.price::NUMERIC,
+        t2.total_supply::NUMERIC AS total_supply,
+        t2.fully_diluted_market_cap::NUMERIC AS fdv,
+        1 as source_priority -- Ordering priority
+    FROM
+        t1 
+    LEFT JOIN 
+        t2 
+    ON 
+        t1.match_key = t2.match_key
+    WHERE 
+        t2.match_key IS NOT NULL 
+        AND t2.price IS NOT NULL
+        AND t2.volume_24h IS NOT NULL
+        AND t2.market_cap IS NOT NULL
+        AND t2.fully_diluted_market_cap IS NOT NULL
+        AND t2.last_updated IS NOT NULL
+
+    UNION ALL
+
+    SELECT
+        token_id,
+        decimals,
+        price,
+        total_supply,
+        fdv,
+        2 as source_priority -- Ordering priority
+    FROM
+        enriched_points
+),
+final_results AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (
+            PARTITION BY token_id 
+            ORDER BY source_priority ASC
+        ) as rn
+    FROM combined_results
 )
-SELECT  
-  t1.token_id,
-  t1.decimals,
-  t2.price::NUMERIC,
-  t2.total_supply::NUMERIC AS total_supply,
-  t2.fully_diluted_market_cap::NUMERIC AS fdv
-FROM
-  t1 
-LEFT JOIN 
-  t2 
-ON 
-  t1.match_key = t2.match_key
-WHERE 
-  t2.match_key IS NOT NULL 
-  AND t2.price IS NOT NULL
-  AND t2.volume_24h IS NOT NULL
-  AND t2.market_cap IS NOT NULL
-  AND t2.fully_diluted_market_cap IS NOT NULL
-  AND t2.last_updated IS NOT NULL
-
-UNION ALL
-
-SELECT
-  token_id,
-  decimals,
-  price,
-  total_supply,
-  fdv
-FROM
-  enriched_points;
+SELECT 
+    token_id,
+    decimals,
+    price,
+    total_supply,
+    fdv
+FROM final_results
+WHERE rn = 1;
   
 -- Drop the existing scheduled job if it exists
 DO $$
