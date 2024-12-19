@@ -47,7 +47,7 @@ unnested_points AS (
   -- Only consider valid, active IP offers
   SELECT 
     unnest(token_ids) as token_id,
-    unnest(token_amounts) as token_amount
+    unnest(token_amounts) * (quantity_remaining::numeric / quantity::numeric) as token_amount
   FROM raw_offers
   WHERE 
     offer_side = 1
@@ -92,8 +92,6 @@ combined_results AS (
     WHERE 
         t2.match_key IS NOT NULL 
         AND t2.price IS NOT NULL
-        AND t2.volume_24h IS NOT NULL
-        AND t2.market_cap IS NOT NULL
         AND t2.fully_diluted_market_cap IS NOT NULL
         AND t2.last_updated IS NOT NULL
 
