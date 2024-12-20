@@ -51,7 +51,18 @@ SELECT cron.schedule(
 
 -- Sync Tokens
 -- Drop existing function if it exists
-DROP FUNCTION IF EXISTS sync_token_index();
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN
+        SELECT oid::regprocedure AS func_signature
+        FROM pg_proc
+        WHERE proname = 'sync_token_index'
+    LOOP
+        EXECUTE 'DROP FUNCTION ' || r.func_signature || ' CASCADE';
+    END LOOP;
+END $$;
 
 -- Create the function to call the API
 CREATE OR REPLACE FUNCTION sync_token_index()
@@ -86,4 +97,54 @@ SELECT cron.schedule(
     'sync_token_index_job',    
     '* * * * *',  -- Every 1 min  
     'SELECT sync_token_index();'
+);
+
+-- Sync Raw Native Yields
+-- Drop existing function if it exists
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN
+        SELECT oid::regprocedure AS func_signature
+        FROM pg_proc
+        WHERE proname = 'sync_raw_native_yields'
+    LOOP
+        EXECUTE 'DROP FUNCTION ' || r.func_signature || ' CASCADE';
+    END LOOP;
+END $$;
+
+-- Create the function to call the API
+CREATE OR REPLACE FUNCTION sync_raw_native_yields()
+RETURNS void AS $$
+DECLARE
+    api_url text := '<BASE_FRONTEND_URL>/api/sync/yield';
+    json_response jsonb;
+BEGIN
+    -- Make the HTTP request
+    json_response := (SELECT content::jsonb FROM http_get(api_url));
+    
+    -- Log the response (optional)
+    RAISE NOTICE 'API Response: %', json_response;
+    
+EXCEPTION WHEN OTHERS THEN
+    -- Log any errors
+    RAISE NOTICE 'Error calling API: %', SQLERRM;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop the existing scheduled job if it exists
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'sync_raw_native_yields_job') THEN
+        PERFORM cron.unschedule('sync_raw_native_yields_job');
+    END IF;
+END
+$$;
+
+-- Create the scheduled job to run every minute 
+SELECT cron.schedule(
+    'sync_raw_native_yields_job',    
+    '* * * * *',  -- Every 1 min  
+    'SELECT sync_raw_native_yields();'
 );

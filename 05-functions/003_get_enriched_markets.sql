@@ -70,6 +70,7 @@ CREATE TYPE enriched_markets_data_type AS (
   
   annual_change_ratios NUMERIC[],
   native_annual_change_ratio NUMERIC,
+  underlying_annual_change_ratio NUMERIC,
   annual_change_ratio NUMERIC
 );
 
@@ -383,9 +384,10 @@ BEGIN
 
         rm.total_incentive_amounts_usd,
         rm.annual_change_ratios,
-        rm.native_annual_change_ratio,
+        ny.annual_change_ratio AS native_annual_change_ratio,
+        rm.native_annual_change_ratio AS underlying_annual_change_ratio,
 
-        -- Modified annual_change_ratio calculation to include native_annual_change_ratio
+        -- Modified annual_change_ratio calculation to include native yields
         CASE 
           WHEN EXISTS (
             SELECT 1 
@@ -394,11 +396,14 @@ BEGIN
           ) THEN 0
           ELSE COALESCE(
             (SELECT SUM(val) FROM UNNEST(rm.annual_change_ratios) AS val), 0
-          ) + COALESCE(rm.native_annual_change_ratio, 0)
+          ) + COALESCE(ny.annual_change_ratio, 0) + COALESCE(rm.native_annual_change_ratio, 0)
         END AS annual_change_ratio
 
       FROM 
         pre_enriched_data rm
+        LEFT JOIN
+        public.raw_native_yields ny
+        ON rm.id = ny.id
       ),
       enriched_data AS (
         SELECT * FROM final_enriched_data 
@@ -455,9 +460,9 @@ FROM unnest((
 SELECT *
 FROM unnest((
     get_enriched_markets(
-      42161, -- chain_id, defaulting to NULL
-      1, -- market_type, defaulting to NULL
-      '0x8ca48c0eedd6903d31c2a69e779f3eef7b059da2' -- market_id, defaulting to NULL
+      1, -- chain_id, defaulting to NULL
+      0, -- market_type, defaulting to NULL
+      '0x83c459782b2ff36629401b1a592354fc085f29ae00cf97b803f73cac464d389b' -- market_id, defaulting to NULL
       -- '[{
       --       "token_id": "11155111-0x3c727dd5ea4c55b7b9a85ea2f287c641481400f7",
       --       "price": 0.0001,
