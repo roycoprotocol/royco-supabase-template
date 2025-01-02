@@ -23,4 +23,20 @@ BEGIN
     IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'raw_positions_recipe') THEN
         DELETE FROM public.raw_positions_recipe;
     END IF;
+
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'raw_authorized_point_issuers') THEN
+        DELETE FROM public.raw_authorized_point_issuers;
+    END IF;
+
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'raw_awards') THEN
+        DELETE FROM public.raw_awards;
+    END IF;
+
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'raw_points') THEN
+        DELETE FROM public.raw_points;
+    END IF;
+
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'raw_point_balances') THEN
+        DELETE FROM public.raw_point_balances;
+    END IF;
 END $$;
