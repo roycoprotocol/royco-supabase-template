@@ -130,7 +130,7 @@ BEGIN
     enriched_data AS (
       SELECT 
         t.chain_id,
-        COALESCE(t.total_tvl, 0) AS total_tvl,
+        COALESCE(t.total_tvl, 0) + COALESCE(i.total_incentive_value, 0) AS total_tvl,
         COALESCE(i.total_incentive_value, 0) AS total_incentives,
         COALESCE(v.total_volume_value, 0) AS total_volume
       FROM 

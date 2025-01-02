@@ -67,6 +67,7 @@ CREATE TYPE enriched_markets_data_type AS (
   quantity_ip_usd NUMERIC,
   locked_quantity_usd NUMERIC,
   total_incentive_amounts_usd NUMERIC,
+  total_value_locked NUMERIC,
   
   annual_change_ratios NUMERIC[],
   native_annual_change_ratio NUMERIC,
@@ -381,8 +382,9 @@ BEGIN
         rm.quantity_ap_usd,
         rm.quantity_ip_usd,
         rm.locked_quantity_usd,
-
         rm.total_incentive_amounts_usd,
+        rm.locked_quantity_usd + rm.total_incentive_amounts_usd AS total_value_locked,
+
         rm.annual_change_ratios,
         ny.annual_change_ratio AS native_annual_change_ratio,
         rm.native_annual_change_ratio AS underlying_annual_change_ratio,
