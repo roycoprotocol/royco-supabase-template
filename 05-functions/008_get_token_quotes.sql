@@ -23,7 +23,8 @@ RETURNS TABLE (
     price NUMERIC,
     total_supply NUMERIC,
     fdv NUMERIC
-) AS
+) 
+AS
 $$
 BEGIN
   RETURN QUERY
@@ -76,6 +77,11 @@ BEGIN
       WHERE acd.token_id = ANY(token_ids)
         AND acd.token_id NOT IN (SELECT tql.token_id FROM token_quotes_latest tql)
   )
+  
+--   token_quotes AS (
+--     SELECT * FROM public.token_quotes_latest
+--   )
+
   SELECT DISTINCT ON (at.token_id) -- Select only distinct variations
       at.token_id,
       COALESCE(tq.decimals, 0) AS decimals,
@@ -86,7 +92,7 @@ BEGIN
   LEFT JOIN token_quotes tq ON at.token_id = tq.token_id
   ORDER BY at.token_id;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql PARALLEL SAFE STABLE;
 
 -- Grant permission
 GRANT EXECUTE ON FUNCTION get_token_quotes TO anon;

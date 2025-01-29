@@ -187,12 +187,20 @@ BEGIN
               rro.input_token_id,
               to_char(rro.quantity, ''FM9999999999999999999999999999999999999999'') AS quantity,
 
-              rro.token_ids,
-              -- Convert token_amounts from NUMERIC[] to TEXT[]
-              array(
-                  SELECT to_char(col_value, ''FM9999999999999999999999999999999999999999'')
-                  FROM unnest(rro.token_amounts) AS col_value
-              ) AS token_amounts,  -- Conversion handled here
+            --   rro.token_ids,
+              ARRAY(
+                  SELECT (rro.token_ids)[idx]
+                  FROM generate_subscripts(rro.token_ids, 1) idx
+              ) AS token_ids,
+
+              -- Ensure token_amounts align with token_ids
+              ARRAY(
+                  SELECT to_char(
+                      (rro.token_amounts)[idx], 
+                      ''FM9999999999999999999999999999999999999999''
+                  )
+                  FROM generate_subscripts(rro.token_ids, 1) idx
+              ) AS token_amounts,
 
               rro.chain_id::TEXT  || ''_'' || ''1'' || ''_'' || rro.market_id AS market_key,
 
@@ -201,23 +209,31 @@ BEGIN
               tp.fdv AS input_token_fdv,
               tp.total_supply AS input_token_total_supply,
 
-              -- Return token prices, fdv, and total_supply
+              -- Ensure token prices align with token_ids in the correct order
               ARRAY(
-                SELECT COALESCE(tp.price::NUMERIC, 0::NUMERIC)
-                FROM UNNEST(rro.token_ids::TEXT[]) AS unnested_token_id -- Cast token_ids to TEXT[] if necessary
-                LEFT JOIN token_quotes tp ON unnested_token_id = tp.token_id
+                  SELECT COALESCE(tp_inner.price::NUMERIC, 0::NUMERIC)
+                  FROM unnest(rro.token_ids) WITH ORDINALITY AS t(token_id, idx)
+                  LEFT JOIN token_quotes tp_inner 
+                      ON t.token_id = tp_inner.token_id
+                  ORDER BY idx
               ) AS token_price_values,
 
+              -- Ensure token fdv aligns with token_ids in the correct order
               ARRAY(
-                SELECT COALESCE(tp.fdv::NUMERIC, 0::NUMERIC)
-                FROM UNNEST(rro.token_ids::TEXT[]) AS unnested_token_id -- Cast token_ids to TEXT[] if necessary
-                LEFT JOIN token_quotes tp ON unnested_token_id = tp.token_id
+                  SELECT COALESCE(tp_inner.fdv::NUMERIC, 0::NUMERIC)
+                  FROM unnest(rro.token_ids) WITH ORDINALITY AS t(token_id, idx)
+                  LEFT JOIN token_quotes tp_inner 
+                      ON t.token_id = tp_inner.token_id
+                  ORDER BY idx
               ) AS token_fdv_values,
 
+              -- Ensure token total supply aligns with token_ids in the correct order
               ARRAY(
-                SELECT COALESCE(tp.total_supply::NUMERIC, 0::NUMERIC)
-                FROM UNNEST(rro.token_ids::TEXT[]) AS unnested_token_id -- Cast token_ids to TEXT[] if necessary
-                LEFT JOIN token_quotes tp ON unnested_token_id = tp.token_id
+                  SELECT COALESCE(tp_inner.total_supply::NUMERIC, 0::NUMERIC)
+                  FROM unnest(rro.token_ids) WITH ORDINALITY AS t(token_id, idx)
+                  LEFT JOIN token_quotes tp_inner 
+                      ON t.token_id = tp_inner.token_id
+                  ORDER BY idx
               ) AS token_total_supply_values,
 
               -- Can Withdraw Column
@@ -314,6 +330,8 @@ GRANT EXECUTE ON FUNCTION get_enriched_positions_vault TO anon;
 SELECT *
 FROM unnest((
     get_enriched_positions_vault(
-        '0x77777cc68b333a2256b436d675e8d257699aa667'
+        '0x77777cc68b333a2256b436d675e8d257699aa667',
+        '11155111',
+        '0xbe2a22476b6e3658fddd04c20928f52929aa4019'
     )
 ).data) AS enriched_offer;

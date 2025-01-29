@@ -36,41 +36,46 @@ DECLARE
 BEGIN
   base_query := '
     WITH 
-    ranked_custom_data AS (
-        SELECT 
-            input.token_id,
-            NULLIF(input.decimals, '''')::NUMERIC AS decimals,
-            NULLIF(input.price, '''')::NUMERIC AS price,
-            NULLIF(input.fdv, '''')::NUMERIC AS fdv,
-            NULLIF(input.total_supply, '''')::NUMERIC AS total_supply,
-            ROW_NUMBER() OVER (PARTITION BY input.token_id ORDER BY (SELECT NULL)) AS row_num
-        FROM 
-            jsonb_to_recordset($1) AS input(token_id TEXT, decimals TEXT, price TEXT, fdv TEXT, total_supply TEXT)
-    ),
-    aggregated_custom_data AS (
-        SELECT 
-            rcd.token_id,
-            (SELECT r.decimals FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.decimals IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS decimals,
-            (SELECT r.price FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.price IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS price,
-            (SELECT r.fdv FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.fdv IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS fdv,
-            (SELECT r.total_supply FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.total_supply IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS total_supply
-        FROM ranked_custom_data rcd
-        GROUP BY rcd.token_id
-    ),
+    -- ranked_custom_data AS (
+    --     SELECT 
+    --         input.token_id,
+    --         NULLIF(input.decimals, '''')::NUMERIC AS decimals,
+    --         NULLIF(input.price, '''')::NUMERIC AS price,
+    --         NULLIF(input.fdv, '''')::NUMERIC AS fdv,
+    --         NULLIF(input.total_supply, '''')::NUMERIC AS total_supply,
+    --         ROW_NUMBER() OVER (PARTITION BY input.token_id ORDER BY (SELECT NULL)) AS row_num
+    --     FROM 
+    --         jsonb_to_recordset($1) AS input(token_id TEXT, decimals TEXT, price TEXT, fdv TEXT, total_supply TEXT)
+    -- ),
+    -- aggregated_custom_data AS (
+    --     SELECT 
+    --         rcd.token_id,
+    --         (SELECT r.decimals FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.decimals IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS decimals,
+    --         (SELECT r.price FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.price IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS price,
+    --         (SELECT r.fdv FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.fdv IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS fdv,
+    --         (SELECT r.total_supply FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.total_supply IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS total_supply
+    --     FROM ranked_custom_data rcd
+    --     GROUP BY rcd.token_id
+    -- ),
+    -- token_quotes AS (
+    --     -- Combine token quotes from the latest data and aggregated input data
+    --     SELECT 
+    --         COALESCE(acd.token_id, tql.token_id) AS token_id,
+    --         COALESCE(acd.decimals, tql.decimals, 18) AS decimals,
+    --         COALESCE(acd.price, tql.price, 0) AS price,
+    --         COALESCE(acd.fdv, tql.fdv, 0) AS fdv,
+    --         COALESCE(acd.total_supply, tql.total_supply, 0) AS total_supply
+    --     FROM 
+    --         token_quotes_latest tql
+    --     FULL OUTER JOIN 
+    --         aggregated_custom_data acd
+    --         ON tql.token_id = acd.token_id
+    -- ),
+
     token_quotes AS (
-        -- Combine token quotes from the latest data and aggregated input data
-        SELECT 
-            COALESCE(acd.token_id, tql.token_id) AS token_id,
-            COALESCE(acd.decimals, tql.decimals, 18) AS decimals,
-            COALESCE(acd.price, tql.price, 0) AS price,
-            COALESCE(acd.fdv, tql.fdv, 0) AS fdv,
-            COALESCE(acd.total_supply, tql.total_supply, 0) AS total_supply
-        FROM 
-            token_quotes_latest tql
-        FULL OUTER JOIN 
-            aggregated_custom_data acd
-            ON tql.token_id = acd.token_id
-    ),
+      SELECT * FROM public.token_quotes_latest
+    )
+
     raw_data AS (
       SELECT 
         em.id,
@@ -150,7 +155,7 @@ BEGIN
 
   RETURN result_data;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql PARALLEL SAFE STABLE;
 
 -- Grant permission
 GRANT EXECUTE ON FUNCTION get_enriched_royco_stats TO anon;

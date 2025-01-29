@@ -269,8 +269,8 @@ BEGIN
             fill_quantity_remaining := 0;
         END IF;
 
-        -- For recipe markets, check if offer_side is 0 and if fill_quantity / r.quantity is less than 0.25
-        IF in_market_type = 0 AND r.offer_side = 0 AND (fill_quantity::NUMERIC / r.quantity) <= 0.25 THEN
+        -- For recipe markets, check if offer_side is 0 and if fill_quantity / r.quantity is less than 0.10
+        IF in_market_type = 0 AND r.offer_side = 0 AND (fill_quantity::NUMERIC / r.quantity) < 0.10 THEN
             fill_quantity_remaining := fill_quantity_remaining + fill_quantity::NUMERIC;
             CONTINUE;
         END IF;
@@ -308,7 +308,7 @@ BEGIN
         EXIT WHEN fill_quantity_remaining <= 0;
     END LOOP;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql PARALLEL SAFE STABLE;
 
 -- Grant permission
 GRANT EXECUTE ON FUNCTION get_market_offers TO anon;
@@ -335,10 +335,10 @@ GRANT EXECUTE ON FUNCTION get_market_offers TO anon;
 -- Sample Query: Change parameters based on your table data
 SELECT * FROM get_market_offers(
     11155111::NUMERIC,                    -- in_chain_id
-    1,                                    -- in_market_type
-    '0xb37a9c19624efe296f9716a6dd65b89318c8cedd'::TEXT,  -- in_market_id
+    0,                                    -- in_market_type
+    '0x2358c05d965774d2db56493dfa94ce3edb7e78a35ebcbff30c112db54a008ce4'::TEXT,  -- in_market_id
     0::SMALLINT,                         -- in_offer_side
-    '100000000'                             -- in_quantity
+    '10000000',                             -- in_quantity
     --  '[{"token_id": "tokenA", "price": "1.5", "fdv": "1500", "total_supply": "1000"}, 
     --   {"token_id": "tokenB", "price": "2.5"},
     --   {"token_id": "tokenB", "price": "88", "total_supply": "90"},
@@ -346,8 +346,8 @@ SELECT * FROM get_market_offers(
     --          {"token_id": "1-0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098", "total_supply": "890"},
     --           {"token_id": "11155111-0x8be045085ee165eee605f7e005dbf5c1a9409265", "price": "0"},
     --   {"token_id": "tokenC", "fdv": "3000"}]'::JSONB
-    -- NULL,
-    -- ARRAY['11155111-0x8be045085ee165eee605f7e005dbf5c1a9409265'],  -- in_incentive_ids
+    NULL,
+    ARRAY['11155111-0x6a7fde508d41e65f768665fc18b9ce554dc50507']  -- in_incentive_ids
     -- ARRAY['100000000000000000000']       -- in_incentive_amounts
 );
 

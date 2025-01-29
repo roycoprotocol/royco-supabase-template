@@ -58,6 +58,9 @@ CREATE TYPE enriched_offer_data_type AS (
   name TEXT,
   lockup_time TEXT,
   reward_style NUMERIC,
+
+  is_valid BOOLEAN,
+
   annual_change_ratios NUMERIC[],
   annual_change_ratio NUMERIC
 );
@@ -77,6 +80,7 @@ CREATE OR REPLACE FUNCTION get_enriched_offers(
     can_be_filled BOOLEAN DEFAULT NULL,
     custom_token_data JSONB DEFAULT '[]'::JSONB, -- Input parameter for array of token data (token_id, decimals, price, fdv, total_supply) 
     page_index INT DEFAULT 0,
+    page_size INT DEFAULT 20,
     filters TEXT DEFAULT NULL,  
     sorting TEXT DEFAULT NULL
 )
@@ -126,6 +130,10 @@ BEGIN
                 ON tql.token_id = acd.token_id
         ),
 
+        -- token_quotes AS (
+        --   SELECT * FROM public.token_quotes_latest
+        -- ),
+
         raw_base_offers AS (
           SELECT 
             ro.id,
@@ -154,7 +162,8 @@ BEGIN
                     THEN false
                 ELSE 
                     true
-            END AS can_be_filled
+            END AS can_be_filled,
+            ro.is_valid
           FROM 
             raw_offers ro
           WHERE
@@ -189,6 +198,7 @@ BEGIN
               rro.transaction_hash,
               rro.block_timestamp,
               rro.can_be_filled,
+              rro.is_valid,
 
               rro.chain_id::TEXT  || ''_'' || rro.market_type::TEXT || ''_'' || rro.market_id AS market_key,
 
@@ -296,8 +306,9 @@ BEGIN
                 ro.incentive_value_usd,
 
                 mu.name,
-                to_char(rm.lockup_time, ''FM9999999999999999999999999999999999999999'') AS lockup_time,
+                to_char(COALESCE(bm.lockup_time, rm.lockup_time), ''FM9999999999999999999999999999999999999999'') AS lockup_time,
                 rm.reward_style,
+                ro.is_valid,
 
                 -- Modify the annual_change_ratios calculation in enriched_raw_data CTE
                 ARRAY(
@@ -309,12 +320,12 @@ BEGIN
                                     (token_amount::NUMERIC / POWER(10, COALESCE(tp.decimals, 18))) * COALESCE(tp.price, 0) * (365 * 24 * 60 * 60)
                                     / COALESCE(ro.quantity_value_usd, 1)
                                 )
-                            WHEN ro.quantity_value_usd = 0 OR rm.lockup_time = 0
+                            WHEN ro.quantity_value_usd = 0 OR COALESCE(bm.lockup_time, rm.lockup_time) = 0
                                 THEN 0
                             ELSE
                                 (
                                     (token_amount::NUMERIC / POWER(10, COALESCE(tp.decimals, 18))) * COALESCE(tp.price, 0) * (365 * 24 * 60 * 60)
-                                    / (COALESCE(ro.quantity_value_usd, 1) * rm.lockup_time::NUMERIC)
+                                    / (COALESCE(ro.quantity_value_usd, 1) * COALESCE(bm.lockup_time, rm.lockup_time)::NUMERIC)
                                 )
                         END
                     FROM UNNEST(
@@ -333,6 +344,10 @@ BEGIN
               public.market_userdata mu
             ON 
               ro.market_key = mu.id
+            LEFT JOIN
+              public.boyco_market_data bm
+            ON
+              ro.market_key = bm.id
           ),
           enriched_pre_data AS (
               SELECT
@@ -390,7 +405,7 @@ BEGIN
     -- Step 5: Return both total count and data
     RETURN (total_count, result_data)::enriched_offers_return_type;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql PARALLEL SAFE STABLE;
 
 -- Grant permission
 GRANT EXECUTE ON FUNCTION get_enriched_offers TO anon;
@@ -400,15 +415,15 @@ FROM unnest((
     get_enriched_offers(
         11155111::NUMERIC,            -- chain_id
         0::INTEGER,                   -- market_type
-        '0x025192ad91a6edf49274b434123ac04d69d30f09b15f45bbd6776e85a2c64174'::TEXT,                         -- in_market_id (set as NULL or pass valid TEXT)
-        '0x77777cc68b333a2256b436d675e8d257699aa667'::TEXT, -- creator
-         NULL
+        '0xe9361c6676c14fe04c72c841d1db72280e0db59b563d5f3e236400078cb4e235'::TEXT,                         -- in_market_id (set as NULL or pass valid TEXT)
+        NULL, -- creator
+         false
         -- '[{
         --     "token_id": "11155111-0x3c727dd5ea4c55b7b9a85ea2f287c641481400f7",
         --     "price": 10,
         --     "fdv": 50000000,
         --     "total_supply": 1000000
-        --   }]'::JSONB,                 -- in_token_data (JSONB)
+        --   }]'::JSON,                 -- in_token_data (JSONB)
         -- 0::INTEGER                 -- page_index
         -- 'offer_side = 1'::TEXT,        -- filters
         -- 'reward_style DESC, change_ratio DESC'

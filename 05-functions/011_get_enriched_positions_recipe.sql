@@ -62,7 +62,20 @@ CREATE TYPE enriched_positions_recipe_data_type AS (
   can_claim BOOLEAN,
 
   name TEXT,
-  lockup_time TEXT
+  lockup_time NUMERIC,
+
+  destination_chain_id NUMERIC,
+  status TEXT,
+
+  weiroll_wallet_destination TEXT,
+  merkle_deposit_nonce NUMERIC,
+
+  deposit_transaction_hash TEXT,
+  forfeit_transaction_hash TEXT,
+  bridge_transaction_hash TEXT,
+  process_transaction_hash TEXT,
+  execute_transaction_hash TEXT,
+  withdraw_transaction_hash TEXT
 );
 
 -- Create return type
@@ -78,6 +91,7 @@ CREATE OR REPLACE FUNCTION get_enriched_positions_recipe(
     market_id TEXT DEFAULT NULL,
     custom_token_data JSONB DEFAULT '[]'::JSONB, -- Input parameter for array of token data (token_id, decimals, price, fdv, total_supply) 
     page_index INT DEFAULT 0,
+    page_size INT DEFAULT 20,
     filters TEXT DEFAULT NULL, 
     sorting TEXT DEFAULT NULL
 )
@@ -91,40 +105,115 @@ BEGIN
     -- Step 1: Construct the base query with the WITH clause properly enclosed
     base_query := '
         WITH 
-        ranked_custom_data AS (
-            SELECT 
-                input.token_id,
-                NULLIF(input.decimals, '''')::NUMERIC AS decimals,
-                NULLIF(input.price, '''')::NUMERIC AS price,
-                NULLIF(input.fdv, '''')::NUMERIC AS fdv,
-                NULLIF(input.total_supply, '''')::NUMERIC AS total_supply,
-                ROW_NUMBER() OVER (PARTITION BY input.token_id ORDER BY (SELECT NULL)) AS row_num
-            FROM 
-                jsonb_to_recordset($1) AS input(token_id TEXT, decimals TEXT, price TEXT, fdv TEXT, total_supply TEXT)
-        ),
-        aggregated_custom_data AS (
-            SELECT 
-                rcd.token_id,
-                (SELECT r.decimals FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.decimals IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS decimals,
-                (SELECT r.price FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.price IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS price,
-                (SELECT r.fdv FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.fdv IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS fdv,
-                (SELECT r.total_supply FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.total_supply IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS total_supply
-            FROM ranked_custom_data rcd
-            GROUP BY rcd.token_id
-        ),
+        -- ranked_custom_data AS (
+        --     SELECT 
+        --         input.token_id,
+        --         NULLIF(input.decimals, '''')::NUMERIC AS decimals,
+        --         NULLIF(input.price, '''')::NUMERIC AS price,
+        --         NULLIF(input.fdv, '''')::NUMERIC AS fdv,
+        --         NULLIF(input.total_supply, '''')::NUMERIC AS total_supply,
+        --         ROW_NUMBER() OVER (PARTITION BY input.token_id ORDER BY (SELECT NULL)) AS row_num
+        --     FROM 
+        --         jsonb_to_recordset($1) AS input(token_id TEXT, decimals TEXT, price TEXT, fdv TEXT, total_supply TEXT)
+        -- ),
+        -- aggregated_custom_data AS (
+        --     SELECT 
+        --         rcd.token_id,
+        --         (SELECT r.decimals FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.decimals IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS decimals,
+        --         (SELECT r.price FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.price IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS price,
+        --         (SELECT r.fdv FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.fdv IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS fdv,
+        --         (SELECT r.total_supply FROM ranked_custom_data r WHERE r.token_id = rcd.token_id AND r.total_supply IS NOT NULL ORDER BY r.row_num DESC LIMIT 1) AS total_supply
+        --     FROM ranked_custom_data rcd
+        --     GROUP BY rcd.token_id
+        -- ),
+        -- token_quotes AS (
+        --     -- Combine token quotes from the latest data and aggregated input data
+        --     SELECT 
+        --         COALESCE(acd.token_id, tql.token_id) AS token_id,
+        --         COALESCE(acd.decimals, tql.decimals, 18) AS decimals,
+        --         COALESCE(acd.price, tql.price, 0) AS price,
+        --         COALESCE(acd.fdv, tql.fdv, 0) AS fdv,
+        --         COALESCE(acd.total_supply, tql.total_supply, 0) AS total_supply
+        --     FROM 
+        --         token_quotes_latest tql
+        --     FULL OUTER JOIN 
+        --         aggregated_custom_data acd
+        --         ON tql.token_id = acd.token_id
+        -- ),
+
         token_quotes AS (
-            -- Combine token quotes from the latest data and aggregated input data
+            SELECT * FROM public.token_quotes_latest
+        ),
+        ccdm_source AS (
             SELECT 
-                COALESCE(acd.token_id, tql.token_id) AS token_id,
-                COALESCE(acd.decimals, tql.decimals, 18) AS decimals,
-                COALESCE(acd.price, tql.price, 0) AS price,
-                COALESCE(acd.fdv, tql.fdv, 0) AS fdv,
-                COALESCE(acd.total_supply, tql.total_supply, 0) AS total_supply
+                ws.chain_id,
+                wd.chain_id AS destination_chain_id,
+                ws.weiroll_wallet,
+                wd.weiroll_wallet AS weiroll_wallet_destination,
+                ws.market_id,
+                ws.ccdm_nonce,
+                dm.merkle_deposit_nonce,
+                ws.deposit_leaf,
+                ws.amount_deposited,
+                rs.total_amount_bridged,
+                wd.receipt_token_amount,
+                ws.deposit_transaction_hash,
+                ws.withdraw_transaction_hash AS forfeit_transaction_hash,
+                rs.bridge_transaction_hash,
+                wd.process_transaction_hash,
+                wd.execute_transaction_hash
             FROM 
-                token_quotes_latest tql
-            FULL OUTER JOIN 
-                aggregated_custom_data acd
-                ON tql.token_id = acd.token_id
+                raw_weiroll_wallet_source ws
+                LEFT JOIN raw_bridge_ref_source rs
+                ON ws.ccdm_nonce = rs.ccdm_nonce
+                AND ws.deposit_leaf = rs.deposit_leaf
+                AND ws.chain_id = rs.chain_id
+                LEFT JOIN raw_weiroll_wallet_destination wd
+                ON ws.ccdm_nonce = wd.ccdm_nonce
+                AND wd.chain_id = CASE 
+                    WHEN ws.chain_id = 11155111 THEN 80000
+                    WHEN ws.chain_id = 1 THEN 80094
+                END
+                LEFT JOIN raw_merkle_deposit_made dm
+                ON ws.chain_id = dm.chain_id AND ws.weiroll_wallet = dm.weiroll_wallet
+        ),
+        ccdm_destination AS (
+            SELECT 
+                cs.*,
+                rd.withdraw_transaction_hash,
+                CASE
+                    WHEN cs.forfeit_transaction_hash IS NOT NULL THEN ''forfeited''
+                    WHEN cs.bridge_transaction_hash IS NULL THEN ''deposited''
+                    WHEN rd.withdraw_transaction_hash IS NOT NULL AND cs.execute_transaction_hash IS NOT NULL THEN ''withdrawn''
+                    WHEN rd.withdraw_transaction_hash IS NOT NULL AND cs.execute_transaction_hash IS NULL THEN ''overdue''
+                    WHEN rd.withdraw_transaction_hash IS NULL AND cs.process_transaction_hash IS NOT NULL THEN ''processed''
+                    ELSE NULL
+                END AS status,
+                CASE 
+                    WHEN cs.forfeit_transaction_hash IS NOT NULL THEN true
+                    WHEN rd.withdraw_transaction_hash IS NOT NULL THEN true
+                    ELSE false
+                END AS is_withdrawn,
+                md.receipt_token_id AS input_token_id,
+                CASE 
+                    WHEN cs.amount_deposited IS NOT NULL 
+                    AND cs.total_amount_bridged IS NOT NULL 
+                    AND cs.receipt_token_amount IS NOT NULL 
+                    AND cs.total_amount_bridged != 0
+                    AND md.receipt_token_id IS NOT NULL
+                    THEN (cs.amount_deposited * cs.receipt_token_amount) / cs.total_amount_bridged 
+                    ELSE NULL 
+                END AS quantity,
+                md.unlock_timestamp
+            FROM
+                ccdm_source cs
+                LEFT JOIN raw_bridge_ref_destination rd
+                ON cs.destination_chain_id = rd.chain_id
+                AND cs.ccdm_nonce = rd.ccdm_nonce
+                AND cs.deposit_leaf = rd.deposit_leaf
+                LEFT JOIN raw_market_destination md
+                ON cs.destination_chain_id = md.chain_id
+                AND cs.market_id = md.market_id
         ),
 
         enriched_positions AS (
@@ -142,8 +231,8 @@ BEGIN
 
               rro.ap,
               rro.ip,
-              rro.input_token_id,
-              to_char(rro.quantity, ''FM9999999999999999999999999999999999999999'') AS quantity,
+              COALESCE(cd.input_token_id, rro.input_token_id) AS input_token_id,
+              to_char(COALESCE(cd.quantity, rro.quantity), ''FM9999999999999999999999999999999999999999'') AS quantity,
 
               rro.token_ids,
               -- Convert token_amounts from NUMERIC[] to TEXT[]
@@ -166,8 +255,9 @@ BEGIN
 
               rro.is_claimed,
               rro.is_forfeited,
-              rro.is_withdrawn,
-              to_char(rro.unlock_timestamp, ''FM9999999999999999999999999999999999999999'') AS unlock_timestamp,
+
+              COALESCE(cd.is_withdrawn, rro.is_withdrawn) AS is_withdrawn,
+              to_char(COALESCE(cd.unlock_timestamp, rro.unlock_timestamp), ''FM9999999999999999999999999999999999999999'') AS unlock_timestamp,
 
               rro.block_number,
               rro.transaction_hash,
@@ -201,9 +291,8 @@ BEGIN
 
               -- Can Withdraw Column
               CASE 
-                  WHEN rro.is_withdrawn = true THEN false
-                  WHEN rro.is_forfeited = true THEN true
-                  WHEN rro.unlock_timestamp < EXTRACT(EPOCH FROM NOW()) AND rro.offer_side = 0 THEN true
+                  WHEN (COALESCE(cd.is_withdrawn, rro.is_withdrawn)) = true THEN false
+                  WHEN COALESCE(cd.unlock_timestamp, rro.unlock_timestamp) < EXTRACT(EPOCH FROM NOW()) AND rro.offer_side = 0 THEN true
                   ELSE false
               END AS can_withdraw,
 
@@ -219,15 +308,32 @@ BEGIN
                       )
                   THEN true
                   ELSE false
-              END AS can_claim
+              END AS can_claim,
+
+              cd.destination_chain_id,
+              cd.status,
+
+              cd.weiroll_wallet_destination,
+              cd.merkle_deposit_nonce,
+
+              cd.deposit_transaction_hash,
+              cd.forfeit_transaction_hash,
+              cd.bridge_transaction_hash,
+              cd.process_transaction_hash,
+              cd.execute_transaction_hash,
+              cd.withdraw_transaction_hash
 
             FROM 
               raw_positions_recipe rro
+            LEFT JOIN
+                ccdm_destination cd ON rro.chain_id = cd.chain_id AND rro.weiroll_wallet = cd.weiroll_wallet
             LEFT JOIN 
-              token_quotes tp ON rro.input_token_id = tp.token_id
+              token_quotes tp 
+              ON COALESCE(cd.input_token_id, rro.input_token_id) = tp.token_id
             WHERE 
               rro.account_address = $2
               AND ($3 IS NULL OR rro.chain_id = $3) -- Optional chain_id
+            
           ),
           enriched_data AS (
             SELECT 
@@ -271,7 +377,20 @@ BEGIN
                 ro.can_withdraw,
                 ro.can_claim,
                 mu.name,
-                rm.lockup_time
+                COALESCE(bm.lockup_time, rm.lockup_time) AS lockup_time,
+
+                ro.destination_chain_id,
+                ro.status,
+
+                ro.weiroll_wallet_destination,
+                ro.merkle_deposit_nonce,
+
+                ro.deposit_transaction_hash,
+                ro.forfeit_transaction_hash,
+                ro.bridge_transaction_hash,
+                ro.process_transaction_hash,
+                ro.execute_transaction_hash,
+                ro.withdraw_transaction_hash
             FROM 
               enriched_positions ro 
             LEFT JOIN 
@@ -282,8 +401,13 @@ BEGIN
               public.market_userdata mu
             ON
               ro.market_key = mu.id
+            LEFT JOIN
+              public.boyco_market_data bm
+            ON 
+              ro.market_key = bm.id
             WHERE 
               ro.id IS NOT NULL
+             
           
     ';
 
@@ -310,14 +434,14 @@ BEGIN
     END IF;
 
     -- Step 6: Execute the paginated query to fetch the result data
-    EXECUTE base_query || ' OFFSET $5 LIMIT 20 ) SELECT ARRAY_AGG(result.*) FROM enriched_data AS result;'
+    EXECUTE base_query || ' OFFSET $5 LIMIT $6 ) SELECT ARRAY_AGG(result.*) FROM enriched_data AS result;'
     INTO result_data
-    USING custom_token_data, account_address, chain_id,  market_id, page_index * 20;
+    USING custom_token_data, account_address, chain_id, market_id, page_index * page_size, page_size;
 
     -- Step 7: Return both total count and data
     RETURN (total_count, result_data)::enriched_positions_recipe_return_type;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql PARALLEL SAFE STABLE;
 
 -- Grant permission
 GRANT EXECUTE ON FUNCTION get_enriched_positions_recipe TO anon;
@@ -326,6 +450,13 @@ GRANT EXECUTE ON FUNCTION get_enriched_positions_recipe TO anon;
 SELECT *
 FROM unnest((
     get_enriched_positions_recipe(
-        '0x77777cc68b333a2256b436d675e8d257699aa667'
+        '0x77777cc68b333a2256b436d675e8d257699aa667',
+        NULL,
+        '0x2226f288fb81a54c5f1ebd244313374c0d49ebea0953e0e7ac23d949d64ecbc1',
+        '[]'::JSONB, -- Input parameter for array of token data (token_id, decimals, price, fdv, total_supply) 
+        0,
+        100,
+        NULL, 
+        NULL
     )
-).data) AS enriched_offer;
+).data) AS enriched_position;

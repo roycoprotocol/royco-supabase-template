@@ -49,7 +49,7 @@ BEGIN
     ) 
     SELECT * FROM filtered_raw_offers;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql PARALLEL SAFE STABLE;
 
 -- Grant permission
 GRANT EXECUTE ON FUNCTION get_validation_offers TO anon;

@@ -45,6 +45,7 @@ CREATE TYPE enriched_markets_data_type AS (
   name TEXT,
   description TEXT,
   is_verified BOOLEAN,
+  category TEXT,
 
   quantity_ap TEXT,
   quantity_ip TEXT,
@@ -69,9 +70,16 @@ CREATE TYPE enriched_markets_data_type AS (
   total_incentive_amounts_usd NUMERIC,
   total_value_locked NUMERIC,
   
-  annual_change_ratios NUMERIC[],
+  native_incentive_ids TEXT[],
+  native_annual_change_ratios NUMERIC[],
   native_annual_change_ratio NUMERIC,
+  
+  external_incentive_ids TEXT[],
+  external_incentive_values TEXT[],
+
   underlying_annual_change_ratio NUMERIC,
+
+  annual_change_ratios NUMERIC[],
   annual_change_ratio NUMERIC
 );
 
@@ -88,10 +96,12 @@ CREATE OR REPLACE FUNCTION get_enriched_markets(
     market_id TEXT DEFAULT NULL,
     custom_token_data JSONB DEFAULT '[]'::JSONB, -- Input parameter for array of token data (token_id, decimals, price, fdv, total_supply) 
     page_index INT DEFAULT 0,
+    page_size INT DEFAULT 20,
     filters TEXT DEFAULT NULL,  -- New input parameter for additional filters
     sorting TEXT DEFAULT NULL,
     search_key TEXT DEFAULT NULL,
-    is_verified BOOLEAN DEFAULT NULL
+    is_verified BOOLEAN DEFAULT NULL,
+    category TEXT DEFAULT NULL
 )
 RETURNS enriched_markets_return_type AS 
 $$
@@ -138,6 +148,10 @@ BEGIN
             ON tql.token_id = acd.token_id
     ),
 
+    -- token_quotes AS (
+    --   SELECT * FROM public.token_quotes_latest
+    -- ),
+
     base_raw_markets AS (
       SELECT 
         rm.id,
@@ -146,7 +160,7 @@ BEGIN
         rm.market_id,
         rm.owner,
         rm.input_token_id,
-        rm.lockup_time,
+        COALESCE(bmd.lockup_time, rm.lockup_time) AS lockup_time,
         rm.frontend_fee,
         rm.reward_style,
 
@@ -166,6 +180,7 @@ BEGIN
         COALESCE(mu.name, ''Unknown market'') AS name,
         COALESCE(mu.description, ''No description available'') AS description,
         COALESCE(mu.is_verified, FALSE) AS is_verified,
+        COALESCE(mu.category, ''default'') AS category,
 
         COALESCE(ms.quantity_ap, 0) AS quantity_ap,
         COALESCE(ms.quantity_ip, 0) AS quantity_ip,
@@ -183,6 +198,10 @@ BEGIN
         LEFT JOIN
         enriched_markets_stats ms
         ON rm.id = ms.id
+        LEFT JOIN
+        boyco_market_data bmd
+        ON rm.id = bmd.id
+        
         
       WHERE
         rm.id IS NOT NULL
@@ -190,6 +209,8 @@ BEGIN
         AND ($3 IS NULL OR rm.market_type = $3) -- Optional market_type
         AND ($4 IS NULL OR rm.market_id = $4) -- Optional market_id
         AND ($5 IS NULL OR mu.is_verified = $5) -- Optional is_verified
+        AND ($6 IS NULL OR mu.category = $6) -- Optional category
+        
     ),
     enriched_raw_markets AS (
       SELECT 
@@ -207,8 +228,8 @@ BEGIN
         COALESCE(incentives_data.incentive_rates_usd, ''{}'') AS incentive_rates_usd,
 
         -- Calculate quantity_ap_usd, quantity_ip_usd and locked_quantity_usd
-        COALESCE((quantity_ap/ (10 ^ tq.decimals)) * tq.price, 0) AS quantity_ap_usd,
-        COALESCE((quantity_ip/ (10 ^ tq.decimals)) * tq.price, 0) AS quantity_ip_usd,
+        COALESCE((quantity_ap / (10 ^ tq.decimals)) * tq.price, 0) AS quantity_ap_usd,
+        COALESCE((quantity_ip / (10 ^ tq.decimals)) * tq.price, 0) AS quantity_ip_usd,
         COALESCE((locked_quantity / (10 ^ tq.decimals)) * tq.price, 0) AS locked_quantity_usd
       FROM 
           base_raw_markets rm
@@ -279,6 +300,7 @@ BEGIN
               true,
               $1,
               0,
+              10,
               ''offer_side = 1'',
               ''annual_change_ratio desc''
             ) o,
@@ -289,10 +311,14 @@ BEGIN
             CASE
               WHEN rm.market_type = 1 AND COALESCE(rm.locked_quantity_usd, 0) = 0 THEN 0
               WHEN rm.market_type = 1
-                THEN (COALESCE(rate_usd, 0) / COALESCE(rm.locked_quantity_usd, 1)) * (365 * 24 * 60 * 60)
+                THEN (COALESCE(rate_usd, 0) / NULLIF(COALESCE(rm.locked_quantity_usd, 1), 0)) * (365 * 24 * 60 * 60)
               ELSE
                 COALESCE(
-                  (SELECT (token_amounts[array_position(token_ids, unnest_incentive_ids.id)]::numeric / total_amount) * annual_change_ratio
+                  (SELECT 
+                    CASE 
+                      WHEN total_amount = 0 THEN 0
+                      ELSE (token_amounts[array_position(token_ids, unnest_incentive_ids.id)]::numeric / total_amount) * annual_change_ratio
+                    END
                   FROM first_offer
                   WHERE unnest_incentive_ids.id = ANY(token_ids)),
                   0  -- Return 0 if no matching token_id found
@@ -306,13 +332,15 @@ BEGIN
         ), ARRAY[]::NUMERIC[]) AS annual_change_ratios,
 
         -- Simply fetch native_annual_change_ratio
-        ruv.native_annual_change_ratio
+        COALESCE(ruy.annual_change_ratio, ruv.native_annual_change_ratio, 0) as native_annual_change_ratio
 
       FROM 
       enriched_raw_markets rm
       LEFT JOIN public.raw_underlying_vaults ruv 
         ON rm.chain_id = ruv.chain_id::numeric 
         AND rm.underlying_vault_address = ruv.underlying_vault_address
+      LEFT JOIN public.raw_underlying_yields ruy
+        ON rm.id = ruy.id
     ),
     final_enriched_data AS (
       SELECT
@@ -323,7 +351,7 @@ BEGIN
         rm.owner,
         rm.input_token_id,
         to_char(rm.lockup_time, ''FM9999999999999999999999999999999999999999'') AS lockup_time,
-        to_char(rm.frontend_fee, ''FM9999999999999999999999999999999999999999'') AS lockup_time,
+        to_char(rm.frontend_fee, ''FM9999999999999999999999999999999999999999'') AS frontend_fee,
         rm.reward_style,
 
         rm.transaction_hash,
@@ -350,6 +378,7 @@ BEGIN
         rm.name,
         rm.description,
         rm.is_verified,
+        rm.category,
 
         to_char(rm.quantity_ap, ''FM9999999999999999999999999999999999999999'') AS quantity_ap,
         to_char(rm.quantity_ip, ''FM9999999999999999999999999999999999999999'') AS quantity_ip,
@@ -385,9 +414,16 @@ BEGIN
         rm.total_incentive_amounts_usd,
         rm.locked_quantity_usd + rm.total_incentive_amounts_usd AS total_value_locked,
 
-        rm.annual_change_ratios,
+        COALESCE(ny.token_ids, ARRAY[]::TEXT[]) AS native_incentive_ids,
+        COALESCE(ny.annual_change_ratios, ARRAY[]::NUMERIC[]) AS native_annual_change_ratios,
         ny.annual_change_ratio AS native_annual_change_ratio,
+
+        COALESCE(ei.token_ids, ARRAY[]::TEXT[]) AS external_incentive_ids,
+        COALESCE(ei.values, ARRAY[]::TEXT[]) AS external_incentive_values,
+
         rm.native_annual_change_ratio AS underlying_annual_change_ratio,
+
+        rm.annual_change_ratios,
 
         -- Modified annual_change_ratio calculation to include native yields
         CASE 
@@ -406,6 +442,9 @@ BEGIN
         LEFT JOIN
         public.raw_native_yields ny
         ON rm.id = ny.id
+        LEFT JOIN
+        public.raw_external_incentives ei
+        ON rm.id = ei.id
       ),
       enriched_data AS (
         SELECT * FROM final_enriched_data 
@@ -428,7 +467,7 @@ BEGIN
   -- Step 3: Calculate total count after filters are applied
   EXECUTE base_query || ' ) SELECT COUNT(*) FROM enriched_data;'
   INTO total_count
-  USING custom_token_data, chain_id, market_type, market_id, is_verified;
+  USING custom_token_data, chain_id, market_type, market_id, is_verified, category;
 
   -- Step 4: Add sorting
   IF sorting IS NOT NULL AND sorting <> '' THEN
@@ -438,23 +477,33 @@ BEGIN
   END IF;
 
   -- Step 4: Execute the paginated query to fetch the result data
-  EXECUTE base_query || ' OFFSET $6 LIMIT 20 ) SELECT ARRAY_AGG(result.*) FROM enriched_data AS result;'
+  EXECUTE base_query || ' OFFSET $7 LIMIT $8 ) SELECT ARRAY_AGG(result.*) FROM enriched_data AS result;'
   INTO result_data
-  USING custom_token_data, chain_id, market_type, market_id, is_verified, page_index * 20;
+  USING custom_token_data, chain_id, market_type, market_id, is_verified, category, page_index * page_size, page_size;
 
   -- Step 5: Return both total count and data
   RETURN (total_count, result_data)::enriched_markets_return_type;
 
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql PARALLEL SAFE STABLE;
 
 -- Grant permission
 GRANT EXECUTE ON FUNCTION get_enriched_markets TO anon;
 
 -- Sample Query 1
+EXPLAIN ANALYZE
 SELECT *
 FROM unnest((
     get_enriched_markets(
+      NULL, -- chain_id, defaulting to NULL
+      NULL, -- market_type, defaulting to NULL
+      NULL, -- market_id, defaulting to NULL
+      '[]'::JSONB, -- custom_token_data
+      0,
+      20,
+      '(category = ''boyco''::text)'
+      --   'locked_quantity_usd DESC',
+      --   'dewscrptas'
     )
 ).data) AS enriched_market;
 
@@ -464,13 +513,13 @@ FROM unnest((
     get_enriched_markets(
       1, -- chain_id, defaulting to NULL
       0, -- market_type, defaulting to NULL
-      '0x83c459782b2ff36629401b1a592354fc085f29ae00cf97b803f73cac464d389b' -- market_id, defaulting to NULL
+      '0xaa449e0679bd82798c7896c6a031f2da55299e64c0b4bddd57ad440921c04628' -- market_id, defaulting to NULL
       -- '[{
       --       "token_id": "11155111-0x3c727dd5ea4c55b7b9a85ea2f287c641481400f7",
       --       "price": 0.0001,
       --       "fdv": 50000000,
       --       "total_supply": 1000000
-      --     }]'::JSONB, -- custom_token_data
+      --     }]'::JSON, -- custom_token_data
 
       --   0,
       --   NULL,
